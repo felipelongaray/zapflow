@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { NovaEmpresaForm } from "./nova-empresa-form";
@@ -67,26 +68,28 @@ export default async function AdminPage() {
         ) : (
           <ul className="flex flex-col gap-2">
             {empresas.map((e: Empresa) => (
-              <li
-                key={e.id}
-                className="rounded-lg border border-white/10 bg-white/5 px-4 py-3"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="font-medium">{e.nome}</span>
-                  <span
-                    className={
-                      e.status === "ativa"
-                        ? "rounded-full bg-accent/15 px-2 py-0.5 text-xs font-medium text-accent"
-                        : "rounded-full bg-white/10 px-2 py-0.5 text-xs font-medium text-foreground/60"
-                    }
-                  >
-                    {e.status}
-                  </span>
-                </div>
-                <p className="mt-1 text-xs text-foreground/50">
-                  {e.max_canais} canal(is) · {e.max_usuarios} usuário(s) ·{" "}
-                  {new Date(e.created_at).toLocaleDateString("pt-BR")}
-                </p>
+              <li key={e.id}>
+                <Link
+                  href={`/admin/empresas/${e.id}`}
+                  className="block rounded-lg border border-white/10 bg-white/5 px-4 py-3 transition hover:border-accent/40 hover:bg-white/[0.07]"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-medium">{e.nome}</span>
+                    <span
+                      className={
+                        e.status === "ativa"
+                          ? "rounded-full bg-accent/15 px-2 py-0.5 text-xs font-medium text-accent"
+                          : "rounded-full bg-amber-400/15 px-2 py-0.5 text-xs font-medium text-amber-300"
+                      }
+                    >
+                      {e.status}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-foreground/50">
+                    {e.max_canais} canal(is) · {e.max_usuarios} usuário(s) ·{" "}
+                    {new Date(e.created_at).toLocaleDateString("pt-BR")}
+                  </p>
+                </Link>
               </li>
             ))}
           </ul>

@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { exigirSuperadminNaRota } from "@/lib/admin/guard";
+import { falha } from "@/lib/admin/http";
 
 // POST /api/admin/criar-empresa
-// Cria, de forma atômica do ponto de vista do usuário: empresa + login do dono
-// + perfil do dono. SÓ pode ser chamado por um superadmin autenticado.
+// Cria, de forma atômica do ponto de vista do usuário: empresa + funil padrão +
+// login do dono + perfil do dono. SÓ pode ser chamado por um superadmin.
 //
 // FLUXO DE SEGURANÇA (a ordem importa):
 //   1) Identifica o chamador pela SESSÃO (cliente normal, sujeito a RLS).
@@ -21,28 +22,9 @@ export async function POST(request: Request) {
   // -------------------------------------------------------------------------
   // 1 + 2. AUTENTICAÇÃO E AUTORIZAÇÃO (obrigatórias, no servidor)
   // -------------------------------------------------------------------------
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
-  }
-
-  // Lê o próprio perfil (a policy de RLS permite ler o próprio perfil).
-  const { data: perfil, error: perfilError } = await supabase
-    .from("perfis")
-    .select("is_super_admin")
-    .eq("id", user.id)
-    .single();
-
-  if (perfilError || !perfil?.is_super_admin) {
-    // 403: autenticado, mas sem privilégio. Nada é executado.
-    return NextResponse.json(
-      { error: "Acesso restrito ao superadmin." },
-      { status: 403 },
-    );
+  const auth = await exigirSuperadminNaRota();
+  if (auth.erro) {
+    return auth.erro;
   }
 
   // -------------------------------------------------------------------------
@@ -121,6 +103,18 @@ export async function POST(request: Request) {
     return falha("criar a empresa", empresaError?.message, 500);
   }
 
+  // 3a.1. Cria o funil padrão da empresa (Novo / Em atendimento / Fechado).
+  const { error: etapasError } = await admin.rpc("criar_etapas_padrao", {
+    empresa_uuid: empresa.id,
+  });
+
+  if (etapasError) {
+    // Cleanup: desfaz a empresa (as etapas têm cascade na empresa, então não
+    // sobram órfãs). Ainda não criamos usuário/perfil nesta etapa.
+    await admin.from("empresas").delete().eq("id", empresa.id);
+    return falha("criar o funil padrão da empresa", etapasError.message, 500);
+  }
+
   // 3b. Cria o login do dono (já confirmado, sem email de verificação).
   const { data: criado, error: userError } = await admin.auth.admin.createUser({
     email: emailDono,
@@ -161,19 +155,4 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({ empresa }, { status: 201 });
-}
-
-// Centraliza o tratamento de falha: um único log por erro (sem poluir) e uma
-// resposta informativa, indicando a etapa que falhou e a mensagem do Supabase.
-// O `detail` (mensagem crua do Supabase) é SEMPRE logado no servidor, mas só
-// vai para o cliente fora de produção — em produção evitamos vazar detalhes
-// internos e devolvemos apenas a mensagem amigável.
-function falha(etapa: string, detalhe: string | undefined, status: number) {
-  const mensagem = `Falha ao ${etapa}.`;
-  console.error(`[criar-empresa] ${mensagem} ${detalhe ?? ""}`.trim());
-  const exporDetalhe = process.env.NODE_ENV !== "production" && detalhe;
-  return NextResponse.json(
-    { error: mensagem, ...(exporDetalhe ? { detail: detalhe } : {}) },
-    { status },
-  );
 }
