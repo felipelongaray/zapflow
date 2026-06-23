@@ -1,0 +1,107 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
+
+export default function LoginPage() {
+  const router = useRouter();
+  const [email, setEmail] = useState("");
+  const [senha, setSenha] = useState("");
+  const [erro, setErro] = useState<string | null>(null);
+  const [carregando, setCarregando] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    // preventDefault evita o submit nativo via GET — credenciais NUNCA podem
+    // ir parar na URL. O fetch de auth é feito programaticamente abaixo.
+    e.preventDefault();
+    setErro(null);
+    setCarregando(true);
+
+    const supabase = createClient();
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password: senha,
+    });
+
+    if (error) {
+      setErro("Email ou senha inválidos.");
+      setCarregando(false);
+      return;
+    }
+
+    // refresh() garante que o proxy/Server Components releiam a nova sessão.
+    router.replace("/inicio");
+    router.refresh();
+  }
+
+  return (
+    <main className="flex min-h-dvh items-center justify-center px-6 py-10">
+      <div className="w-full max-w-sm">
+        <div className="mb-8 text-center">
+          <h1 className="text-2xl font-bold tracking-tight">
+            zap<span className="text-accent">flow</span>
+          </h1>
+          <p className="mt-2 text-sm text-foreground/60">
+            Entre com sua conta para continuar
+          </p>
+        </div>
+
+        {/* method="post" é defesa em profundidade: mesmo que o JS falhe, o
+            navegador não enviaria as credenciais por querystring (GET). */}
+        <form method="post" onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="email" className="text-sm font-medium text-foreground/80">
+              Email
+            </label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-foreground outline-none transition focus:border-accent focus:ring-1 focus:ring-accent"
+              placeholder="voce@empresa.com"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="senha" className="text-sm font-medium text-foreground/80">
+              Senha
+            </label>
+            <input
+              id="senha"
+              name="senha"
+              type="password"
+              autoComplete="current-password"
+              required
+              value={senha}
+              onChange={(e) => setSenha(e.target.value)}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-foreground outline-none transition focus:border-accent focus:ring-1 focus:ring-accent"
+              placeholder="••••••••"
+            />
+          </div>
+
+          {erro && (
+            <p
+              role="alert"
+              className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300"
+            >
+              {erro}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={carregando}
+            className="mt-2 rounded-lg bg-accent px-4 py-2.5 font-semibold text-[#0E1512] transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {carregando ? "Entrando..." : "Entrar"}
+          </button>
+        </form>
+      </div>
+    </main>
+  );
+}
