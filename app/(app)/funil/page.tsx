@@ -48,6 +48,7 @@ export default async function FunilPage() {
       </header>
 
       <FunilBoard
+        empresaId={perfil.empresa_id}
         etapas={(etapas as Etapa[]) ?? []}
         contatosIniciais={(contatos as Contato[]) ?? []}
       />
