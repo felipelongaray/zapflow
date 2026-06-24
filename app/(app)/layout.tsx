@@ -27,13 +27,13 @@ function AcessoSuspenso() {
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-6 px-6 py-10 text-center">
       <div className="max-w-sm">
-        <span className="inline-block rounded-full bg-amber-400/15 px-3 py-1 text-xs font-medium text-amber-300">
+        <span className="inline-block rounded-full bg-warning-subtle px-3 py-1 text-xs font-medium text-warning">
           Acesso suspenso
         </span>
         <h1 className="mt-4 text-2xl font-bold tracking-tight">
           Sua empresa está temporariamente suspensa
         </h1>
-        <p className="mt-2 text-sm text-foreground/60">
+        <p className="mt-2 text-sm text-muted">
           O acesso ao zapflow foi pausado. Entre em contato com o suporte para
           regularizar a situação.
         </p>

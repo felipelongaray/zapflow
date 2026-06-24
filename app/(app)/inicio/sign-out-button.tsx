@@ -21,7 +21,7 @@ export function SignOutButton() {
       type="button"
       onClick={handleSignOut}
       disabled={saindo}
-      className="rounded-lg border border-white/15 px-4 py-2 text-sm font-medium text-foreground transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-60"
+      className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground transition hover:bg-primary-subtle disabled:cursor-not-allowed disabled:opacity-60"
     >
       {saindo ? "Saindo..." : "Sair"}
     </button>

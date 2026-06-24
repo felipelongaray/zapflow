@@ -36,9 +36,9 @@ export default async function InicioPage() {
     <main className="flex min-h-dvh flex-col items-center justify-center gap-6 px-6 py-10 text-center">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">
-          zap<span className="text-accent">flow</span>
+          zap<span className="text-primary">flow</span>
         </h1>
-        <p className="mt-2 max-w-sm text-sm text-foreground/60">
+        <p className="mt-2 max-w-sm text-sm text-muted">
           Sua conta ainda não está vinculada a nenhuma empresa. Fale com o
           administrador para concluir o acesso.
         </p>

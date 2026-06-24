@@ -1,16 +1,83 @@
 @import "tailwindcss";
 
+/* =============================================================================
+   zapflow — paleta Índigo Moderno
+   Tokens SEMÂNTICOS (não cores soltas). Trocar a identidade depois = mexer só
+   aqui. O tema CLARO é o padrão (em :root). O tema ESCURO já está definido em
+   .dark com os MESMOS nomes de token — basta um toggle adicionar a classe
+   `dark` no <html> futuramente; nenhuma tela precisa mudar.
+   ============================================================================= */
+
+/* ---- Tema CLARO (padrão) ---- */
 :root {
-  /* Tema escuro do zapflow */
-  --background: #0e1512;
-  --foreground: #e8f0eb;
-  --accent: #b6ff3c;
+  /* Marca / primária (índigo) */
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --primary-subtle: #eae8fb; /* fundo sutil tingido de índigo */
+  --primary-foreground: #ffffff; /* texto sobre a cor primária */
+
+  /* Superfícies */
+  --background: #fafaff; /* página */
+  --surface: #ffffff; /* cards / modais */
+  --border: #e6e5f4; /* bordas sutis */
+
+  /* Texto */
+  --foreground: #1e1b4b; /* principal (índigo escuro) */
+  --muted: #6e6b8a; /* secundário */
+
+  /* Status */
+  --success: #16a34a;
+  --success-subtle: #dcfce7;
+  --warning: #b45309;
+  --warning-subtle: #fef3c7;
+  --danger: #dc2626;
+  --danger-subtle: #fee2e2;
 }
 
+/* ---- Tema ESCURO (preparado; ativa com .dark no <html>) ---- */
+.dark {
+  --primary: #818cf8;
+  --primary-hover: #a5b4fc;
+  --primary-subtle: #312e81;
+  --primary-foreground: #0b1020;
+
+  --background: #0b1020;
+  --surface: #14172b;
+  --border: #2a2f4a;
+
+  --foreground: #e9e9f6;
+  --muted: #a3a0c2;
+
+  --success: #4ade80;
+  --success-subtle: #14331f;
+  --warning: #fbbf24;
+  --warning-subtle: #3a2c0a;
+  --danger: #f87171;
+  --danger-subtle: #3a1414;
+}
+
+/* ---- Exposição como utilitários do Tailwind (inline = resolve em runtime,
+   então os valores trocam sob .dark sem recompilar). ---- */
 @theme inline {
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-subtle: var(--primary-subtle);
+  --color-primary-foreground: var(--primary-foreground);
+
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-border: var(--border);
+
   --color-foreground: var(--foreground);
-  --color-accent: var(--accent);
+  --color-muted: var(--muted);
+
+  --color-success: var(--success);
+  --color-success-subtle: var(--success-subtle);
+  --color-warning: var(--warning);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-danger: var(--danger);
+  --color-danger-subtle: var(--danger-subtle);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

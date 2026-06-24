@@ -40,9 +40,9 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-bold tracking-tight">
-            zap<span className="text-accent">flow</span>
+            zap<span className="text-primary">flow</span>
           </h1>
-          <p className="mt-2 text-sm text-foreground/60">
+          <p className="mt-2 text-sm text-muted">
             Entre com sua conta para continuar
           </p>
         </div>
@@ -51,7 +51,7 @@ export default function LoginPage() {
             navegador não enviaria as credenciais por querystring (GET). */}
         <form method="post" onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
-            <label htmlFor="email" className="text-sm font-medium text-foreground/80">
+            <label htmlFor="email" className="text-sm font-medium text-foreground">
               Email
             </label>
             <input
@@ -62,13 +62,13 @@ export default function LoginPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-foreground outline-none transition focus:border-accent focus:ring-1 focus:ring-accent"
+              className="rounded-lg border border-border bg-surface px-3 py-2.5 text-foreground outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
               placeholder="voce@empresa.com"
             />
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label htmlFor="senha" className="text-sm font-medium text-foreground/80">
+            <label htmlFor="senha" className="text-sm font-medium text-foreground">
               Senha
             </label>
             <input
@@ -79,7 +79,7 @@ export default function LoginPage() {
               required
               value={senha}
               onChange={(e) => setSenha(e.target.value)}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-foreground outline-none transition focus:border-accent focus:ring-1 focus:ring-accent"
+              className="rounded-lg border border-border bg-surface px-3 py-2.5 text-foreground outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
               placeholder="••••••••"
             />
           </div>
@@ -87,7 +87,7 @@ export default function LoginPage() {
           {erro && (
             <p
               role="alert"
-              className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300"
+              className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger"
             >
               {erro}
             </p>
@@ -96,7 +96,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={carregando}
-            className="mt-2 rounded-lg bg-accent px-4 py-2.5 font-semibold text-[#0E1512] transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-2 rounded-lg bg-primary px-4 py-2.5 font-semibold text-primary-foreground transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
             {carregando ? "Entrando..." : "Entrar"}
           </button>

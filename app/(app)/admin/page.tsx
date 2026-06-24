@@ -47,9 +47,9 @@ export default async function AdminPage() {
     <main className="mx-auto w-full max-w-3xl px-6 py-10">
       <header className="mb-8">
         <h1 className="text-2xl font-bold tracking-tight">
-          Admin · <span className="text-accent">empresas</span>
+          Admin · <span className="text-primary">empresas</span>
         </h1>
-        <p className="mt-1 text-sm text-foreground/60">
+        <p className="mt-1 text-sm text-muted">
           Crie empresas e o login do respectivo dono.
         </p>
       </header>
@@ -57,12 +57,12 @@ export default async function AdminPage() {
       <NovaEmpresaForm />
 
       <section className="mt-10">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-foreground/50">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">
           Empresas ({empresas?.length ?? 0})
         </h2>
 
         {!empresas || empresas.length === 0 ? (
-          <p className="text-sm text-foreground/50">
+          <p className="text-sm text-muted">
             Nenhuma empresa cadastrada ainda.
           </p>
         ) : (
@@ -71,21 +71,21 @@ export default async function AdminPage() {
               <li key={e.id}>
                 <Link
                   href={`/admin/empresas/${e.id}`}
-                  className="block rounded-lg border border-white/10 bg-white/5 px-4 py-3 transition hover:border-accent/40 hover:bg-white/[0.07]"
+                  className="block rounded-lg border border-border bg-surface px-4 py-3 transition hover:border-primary/40 hover:bg-primary-subtle"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <span className="font-medium">{e.nome}</span>
                     <span
                       className={
                         e.status === "ativa"
-                          ? "rounded-full bg-accent/15 px-2 py-0.5 text-xs font-medium text-accent"
-                          : "rounded-full bg-amber-400/15 px-2 py-0.5 text-xs font-medium text-amber-300"
+                          ? "rounded-full bg-success-subtle px-2 py-0.5 text-xs font-medium text-success"
+                          : "rounded-full bg-warning-subtle px-2 py-0.5 text-xs font-medium text-warning"
                       }
                     >
                       {e.status}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs text-foreground/50">
+                  <p className="mt-1 text-xs text-muted">
                     {e.max_canais} canal(is) · {e.max_usuarios} usuário(s) ·{" "}
                     {new Date(e.created_at).toLocaleDateString("pt-BR")}
                   </p>

@@ -37,12 +37,12 @@ export default async function FunilPage() {
 
   return (
     <main className="flex min-h-dvh flex-col">
-      <header className="flex items-center justify-between gap-4 border-b border-[#243029] px-5 py-4">
+      <header className="flex items-center justify-between gap-4 border-b border-border bg-surface px-5 py-4">
         <div>
           <h1 className="text-lg font-bold tracking-tight">
-            zap<span className="text-accent">flow</span>
+            zap<span className="text-primary">flow</span>
           </h1>
-          <p className="text-xs text-foreground/50">Funil de atendimento</p>
+          <p className="text-xs text-muted">Funil de atendimento</p>
         </div>
         <SignOutButton />
       </header>

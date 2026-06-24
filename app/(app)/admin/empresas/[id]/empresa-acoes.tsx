@@ -12,8 +12,8 @@ type Empresa = {
 };
 
 const inputClass =
-  "rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-foreground outline-none transition focus:border-accent focus:ring-1 focus:ring-accent";
-const labelClass = "text-sm font-medium text-foreground/80";
+  "rounded-lg border border-border bg-background px-3 py-2.5 text-foreground outline-none transition focus:border-primary focus:ring-1 focus:ring-primary";
+const labelClass = "text-sm font-medium text-foreground";
 
 export function EmpresaAcoes({ empresa }: { empresa: Empresa }) {
   const router = useRouter();
@@ -64,9 +64,9 @@ export function EmpresaAcoes({ empresa }: { empresa: Empresa }) {
     return (
       <form
         onSubmit={handleEditar}
-        className="flex flex-col gap-4 rounded-xl border border-white/10 bg-white/5 p-5"
+        className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-5"
       >
-        <h2 className="text-sm font-semibold text-foreground/50">
+        <h2 className="text-sm font-semibold text-muted">
           Editar empresa
         </h2>
         <div className="flex flex-col gap-1.5">
@@ -119,7 +119,7 @@ export function EmpresaAcoes({ empresa }: { empresa: Empresa }) {
           <button
             type="submit"
             disabled={ocupado}
-            className="rounded-lg bg-accent px-4 py-2.5 font-semibold text-[#0E1512] transition hover:brightness-95 disabled:opacity-60"
+            className="rounded-lg bg-primary px-4 py-2.5 font-semibold text-primary-foreground transition hover:bg-primary-hover disabled:opacity-60"
           >
             {ocupado ? "Salvando..." : "Salvar"}
           </button>
@@ -129,7 +129,7 @@ export function EmpresaAcoes({ empresa }: { empresa: Empresa }) {
               setErro(null);
               setEditando(false);
             }}
-            className="rounded-lg border border-white/15 px-4 py-2.5 font-medium transition hover:bg-white/5"
+            className="rounded-lg border border-border px-4 py-2.5 font-medium transition hover:bg-primary-subtle"
           >
             Cancelar
           </button>
@@ -147,7 +147,7 @@ export function EmpresaAcoes({ empresa }: { empresa: Empresa }) {
             setErro(null);
             setEditando(true);
           }}
-          className="rounded-lg border border-white/15 px-4 py-2.5 font-medium transition hover:bg-white/5"
+          className="rounded-lg border border-border px-4 py-2.5 font-medium transition hover:bg-primary-subtle"
         >
           Editar
         </button>
@@ -158,8 +158,8 @@ export function EmpresaAcoes({ empresa }: { empresa: Empresa }) {
           disabled={ocupado}
           className={
             suspensa
-              ? "rounded-lg bg-accent px-4 py-2.5 font-semibold text-[#0E1512] transition hover:brightness-95 disabled:opacity-60"
-              : "rounded-lg border border-amber-400/40 px-4 py-2.5 font-medium text-amber-300 transition hover:bg-amber-400/10 disabled:opacity-60"
+              ? "rounded-lg bg-primary px-4 py-2.5 font-semibold text-primary-foreground transition hover:bg-primary-hover disabled:opacity-60"
+              : "rounded-lg border border-warning/40 px-4 py-2.5 font-medium text-warning transition hover:bg-warning-subtle disabled:opacity-60"
           }
         >
           {suspensa ? "Reativar" : "Suspender"}
@@ -171,7 +171,7 @@ export function EmpresaAcoes({ empresa }: { empresa: Empresa }) {
             setErro(null);
             setConfirmandoExclusao(true);
           }}
-          className="rounded-lg border border-red-500/40 px-4 py-2.5 font-medium text-red-300 transition hover:bg-red-500/10"
+          className="rounded-lg border border-danger/40 px-4 py-2.5 font-medium text-danger transition hover:bg-danger-subtle"
         >
           Excluir
         </button>
@@ -228,14 +228,14 @@ function ModalExcluir({
   const habilitado = nomeDigitado.trim() === empresa.nome && !ocupado;
 
   return (
-    <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-5">
-      <h2 className="font-semibold text-red-300">Excluir empresa</h2>
-      <p className="mt-2 text-sm text-foreground/70">
+    <div className="rounded-xl border border-danger/30 bg-danger-subtle p-5">
+      <h2 className="font-semibold text-danger">Excluir empresa</h2>
+      <p className="mt-2 text-sm text-muted">
         Esta ação é <strong>irreversível</strong>. Serão removidos todos os
         contatos, conversas, mensagens, etapas, usuários e os logins de acesso
         desta empresa.
       </p>
-      <p className="mt-3 text-sm text-foreground/70">
+      <p className="mt-3 text-sm text-muted">
         Para confirmar, digite o nome exato:{" "}
         <span className="font-semibold text-foreground">{empresa.nome}</span>
       </p>
@@ -244,7 +244,7 @@ function ModalExcluir({
         value={nomeDigitado}
         onChange={(e) => setNomeDigitado(e.target.value)}
         autoComplete="off"
-        className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-foreground outline-none transition focus:border-red-400 focus:ring-1 focus:ring-red-400"
+        className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-foreground outline-none transition focus:border-danger focus:ring-1 focus:ring-danger"
         placeholder="Nome da empresa"
       />
 
@@ -255,14 +255,14 @@ function ModalExcluir({
           type="button"
           disabled={!habilitado}
           onClick={() => onConfirmar(nomeDigitado)}
-          className="rounded-lg bg-red-500 px-4 py-2.5 font-semibold text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-lg bg-danger px-4 py-2.5 font-semibold text-primary-foreground transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {ocupado ? "Excluindo..." : "Excluir definitivamente"}
         </button>
         <button
           type="button"
           onClick={onCancelar}
-          className="rounded-lg border border-white/15 px-4 py-2.5 font-medium transition hover:bg-white/5"
+          className="rounded-lg border border-border px-4 py-2.5 font-medium transition hover:bg-primary-subtle"
         >
           Cancelar
         </button>
@@ -275,7 +275,7 @@ function Erro({ mensagem }: { mensagem: string }) {
   return (
     <p
       role="alert"
-      className="mt-1 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300"
+      className="mt-1 rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger"
     >
       {mensagem}
     </p>

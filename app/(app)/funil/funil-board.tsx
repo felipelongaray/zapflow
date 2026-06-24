@@ -244,7 +244,7 @@ export function FunilBoard({
   return (
     <div className="flex flex-1 flex-col">
       <div className="flex items-center justify-between gap-3 px-5 pt-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-foreground/50">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
           Contatos
         </h2>
         <div className="flex gap-2">
@@ -252,7 +252,7 @@ export function FunilBoard({
             <button
               type="button"
               onClick={() => setGerenciarEtapas(true)}
-              className="rounded-lg border border-white/15 px-3 py-2 text-sm font-medium transition hover:bg-white/5"
+              className="rounded-lg border border-border px-3 py-2 text-sm font-medium transition hover:bg-primary-subtle"
             >
               Gerenciar funil
             </button>
@@ -260,7 +260,7 @@ export function FunilBoard({
           <button
             type="button"
             onClick={() => setCriarEm(etapaPadrao || null)}
-            className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-[#0E1512] transition hover:brightness-95"
+            className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground transition hover:bg-primary-hover"
           >
             + Novo contato
           </button>
@@ -270,14 +270,14 @@ export function FunilBoard({
       {erro && (
         <p
           role="alert"
-          className="mx-5 mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300"
+          className="mx-5 mt-3 rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger"
         >
           {erro}
         </p>
       )}
 
       {colunas.length === 0 ? (
-        <p className="px-5 py-10 text-sm text-foreground/50">
+        <p className="px-5 py-10 text-sm text-muted">
           Nenhuma etapa configurada para esta empresa.
         </p>
       ) : (
@@ -357,14 +357,14 @@ function Coluna({
   return (
     <section
       ref={setNodeRef}
-      className={`flex w-72 shrink-0 flex-col rounded-xl border bg-white/[0.02] transition ${
-        isOver ? "border-accent/60" : "border-[#243029]"
+      className={`flex w-72 shrink-0 flex-col rounded-xl border bg-background transition ${
+        isOver ? "border-primary" : "border-border"
       }`}
     >
       <header className="flex items-center justify-between gap-2 px-3 py-2.5">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold">{nome}</h2>
-          <span className="rounded-full bg-white/5 px-2 py-0.5 text-xs text-foreground/50">
+          <span className="rounded-full bg-primary-subtle px-2 py-0.5 text-xs text-muted">
             {contatos.length}
           </span>
         </div>
@@ -373,7 +373,7 @@ function Coluna({
             type="button"
             onClick={onAdicionar}
             aria-label={`Novo contato em ${nome}`}
-            className="rounded-md px-1.5 text-lg leading-none text-foreground/40 transition hover:bg-white/5 hover:text-accent"
+            className="rounded-md px-1.5 text-lg leading-none text-muted transition hover:bg-primary-subtle hover:text-primary"
           >
             +
           </button>
@@ -408,7 +408,7 @@ function Cartao({
     <article
       ref={setNodeRef}
       style={style}
-      className="flex items-start justify-between gap-2 rounded-lg border border-[#243029] bg-[#141D18] px-3 py-2.5"
+      className="flex items-start justify-between gap-2 rounded-lg border border-border bg-surface px-3 py-2.5 shadow-sm"
     >
       {/* Área de ARRASTE: ocupa o corpo do card e recebe os listeners do dnd. */}
       <div
@@ -419,7 +419,7 @@ function Cartao({
         <p className="truncate text-sm font-medium text-foreground">
           {contato.nome ?? "Sem nome"}
         </p>
-        <p className="mt-0.5 text-xs text-foreground/50">{contato.telefone}</p>
+        <p className="mt-0.5 text-xs text-muted">{contato.telefone}</p>
       </div>
 
       {/* Botão de EDITAR: stopPropagation no pointerdown impede que o dnd inicie
@@ -429,7 +429,7 @@ function Cartao({
         aria-label="Editar contato"
         onPointerDown={(e) => e.stopPropagation()}
         onClick={onEditar}
-        className="shrink-0 rounded-md p-1 text-foreground/40 transition hover:bg-white/5 hover:text-accent"
+        className="shrink-0 rounded-md p-1 text-muted transition hover:bg-primary-subtle hover:text-primary"
       >
         <IconeEditar />
       </button>
@@ -510,7 +510,7 @@ function CriarContatoModal({
           <button
             type="submit"
             disabled={salvando}
-            className="rounded-lg bg-accent px-4 py-2.5 font-semibold text-[#0E1512] transition hover:brightness-95 disabled:opacity-60"
+            className="rounded-lg bg-primary px-4 py-2.5 font-semibold text-primary-foreground transition hover:bg-primary-hover disabled:opacity-60"
           >
             {salvando ? "Criando..." : "Criar contato"}
           </button>
@@ -597,7 +597,7 @@ function EditarContatoModal({
             <button
               type="submit"
               disabled={salvando}
-              className="rounded-lg bg-accent px-4 py-2.5 font-semibold text-[#0E1512] transition hover:brightness-95 disabled:opacity-60"
+              className="rounded-lg bg-primary px-4 py-2.5 font-semibold text-primary-foreground transition hover:bg-primary-hover disabled:opacity-60"
             >
               {salvando ? "Salvando..." : "Salvar"}
             </button>
@@ -607,17 +607,18 @@ function EditarContatoModal({
           {!confirmandoExclusao ? (
             <button
               type="button"
+              aria-label="Excluir contato"
               onClick={() => setConfirmandoExclusao(true)}
-              className="rounded-lg border border-red-500/40 px-3 py-2.5 text-sm font-medium text-red-300 transition hover:bg-red-500/10"
+              className="shrink-0 rounded-md p-1.5 text-muted transition hover:bg-danger-subtle hover:text-danger"
             >
-              Excluir
+              <IconeLixeira />
             </button>
           ) : (
             <button
               type="button"
               onClick={handleExcluir}
               disabled={salvando}
-              className="rounded-lg bg-red-500 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-red-600 disabled:opacity-60"
+              className="rounded-lg bg-danger px-3 py-2.5 text-sm font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-60"
             >
               Confirmar exclusão
             </button>
@@ -672,7 +673,7 @@ function GerenciarEtapasModal({
     <Modal titulo="Gerenciar etapas" onFechar={onFechar}>
       <div className="flex flex-col gap-2.5">
         {etapas.length === 0 && (
-          <p className="rounded-lg border border-[#243029] bg-[#141D18] px-3 py-4 text-center text-sm text-foreground/50">
+          <p className="rounded-lg border border-border bg-background px-3 py-4 text-center text-sm text-muted">
             Nenhuma etapa ainda.
           </p>
         )}
@@ -683,16 +684,16 @@ function GerenciarEtapasModal({
           return (
             <div
               key={etapa.id}
-              className="rounded-lg border border-[#243029] bg-[#141D18] p-3"
+              className="rounded-lg border border-border bg-background p-3"
             >
               <div className="flex items-center gap-3">
-                <div className="flex shrink-0 flex-col text-foreground/35">
+                <div className="flex shrink-0 flex-col text-muted">
                   <button
                     type="button"
                     aria-label="Subir etapa"
                     disabled={i === 0 || ocupado}
                     onClick={() => executar(() => onMover(etapa.id, -1))}
-                    className="text-[10px] leading-tight transition hover:text-accent disabled:opacity-25"
+                    className="text-[10px] leading-tight transition hover:text-primary disabled:opacity-25"
                   >
                     ▲
                   </button>
@@ -701,7 +702,7 @@ function GerenciarEtapasModal({
                     aria-label="Descer etapa"
                     disabled={i === etapas.length - 1 || ocupado}
                     onClick={() => executar(() => onMover(etapa.id, 1))}
-                    className="text-[10px] leading-tight transition hover:text-accent disabled:opacity-25"
+                    className="text-[10px] leading-tight transition hover:text-primary disabled:opacity-25"
                   >
                     ▼
                   </button>
@@ -716,7 +717,7 @@ function GerenciarEtapasModal({
 
                 <span
                   title={`${qtd} contato(s)`}
-                  className="shrink-0 rounded-full bg-white/5 px-2 py-0.5 text-xs tabular-nums text-foreground/50"
+                  className="shrink-0 rounded-full bg-primary-subtle px-2 py-0.5 text-xs tabular-nums text-muted"
                 >
                   {qtd}
                 </span>
@@ -728,20 +729,20 @@ function GerenciarEtapasModal({
                     setErro(null);
                     setConfirmando(etapa.id);
                   }}
-                  className="shrink-0 rounded-md p-1.5 text-foreground/40 transition hover:bg-red-500/10 hover:text-red-300"
+                  className="shrink-0 rounded-md p-1.5 text-muted transition hover:bg-danger-subtle hover:text-danger"
                 >
                   <IconeLixeira />
                 </button>
               </div>
 
               {confirmandoEsta && (
-                <div className="mt-2 rounded-md border border-amber-400/30 bg-amber-400/10 p-2.5 text-sm">
+                <div className="mt-2 rounded-md border border-warning/30 bg-warning-subtle p-2.5 text-sm">
                   {qtd > 0 ? (
-                    <p className="text-amber-200">
+                    <p className="text-warning">
                       Esta etapa tem {qtd} contato(s). Eles ficarão sem etapa.
                     </p>
                   ) : (
-                    <p className="text-foreground/70">Remover esta etapa?</p>
+                    <p className="text-muted">Remover esta etapa?</p>
                   )}
                   <div className="mt-2 flex gap-2">
                     <button
@@ -751,14 +752,14 @@ function GerenciarEtapasModal({
                         const msg = await executar(() => onRemover(etapa.id));
                         if (!msg) setConfirmando(null);
                       }}
-                      className="rounded-md bg-red-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-600 disabled:opacity-60"
+                      className="rounded-md bg-danger px-3 py-1.5 text-xs font-semibold text-primary-foreground transition hover:brightness-95 disabled:opacity-60"
                     >
                       Confirmar
                     </button>
                     <button
                       type="button"
                       onClick={() => setConfirmando(null)}
-                      className="rounded-md border border-white/15 px-3 py-1.5 text-xs font-medium transition hover:bg-white/5"
+                      className="rounded-md border border-border px-3 py-1.5 text-xs font-medium transition hover:bg-primary-subtle"
                     >
                       Cancelar
                     </button>
@@ -771,8 +772,8 @@ function GerenciarEtapasModal({
       </div>
 
       {/* Adicionar nova etapa (vai para o fim da ordem). */}
-      <div className="mt-5 border-t border-[#243029] pt-4">
-        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-foreground/40">
+      <div className="mt-5 border-t border-border pt-4">
+        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">
           Nova etapa
         </p>
         <div className="flex gap-2">
@@ -787,7 +788,7 @@ function GerenciarEtapasModal({
             type="button"
             disabled={ocupado || !novoNome.trim()}
             onClick={handleAdicionar}
-            className="shrink-0 rounded-lg bg-accent px-4 py-2.5 font-semibold text-[#0E1512] transition hover:brightness-95 disabled:opacity-50"
+            className="shrink-0 rounded-lg bg-primary px-4 py-2.5 font-semibold text-primary-foreground transition hover:bg-primary-hover disabled:opacity-50"
           >
             Adicionar
           </button>
@@ -822,7 +823,7 @@ function Modal({
       onClick={onFechar}
     >
       <div
-        className="w-full max-w-sm rounded-2xl border border-[#243029] bg-[#0E1512] p-5"
+        className="w-full max-w-sm rounded-2xl border border-border bg-surface p-5 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="mb-4 text-lg font-bold tracking-tight">{titulo}</h2>
@@ -870,7 +871,7 @@ function Campo({
 }) {
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-sm font-medium text-foreground/80">{label}</span>
+      <span className="text-sm font-medium text-foreground">{label}</span>
       {children}
     </label>
   );
@@ -881,7 +882,7 @@ function BotaoCancelar({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="rounded-lg border border-white/15 px-4 py-2.5 font-medium transition hover:bg-white/5"
+      className="rounded-lg border border-border px-4 py-2.5 font-medium transition hover:bg-primary-subtle"
     >
       Cancelar
     </button>
@@ -892,7 +893,7 @@ function ErroMsg({ mensagem }: { mensagem: string }) {
   return (
     <p
       role="alert"
-      className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300"
+      className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger"
     >
       {mensagem}
     </p>
@@ -941,4 +942,4 @@ function IconeLixeira() {
 }
 
 const inputClass =
-  "rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-foreground outline-none transition focus:border-accent focus:ring-1 focus:ring-accent";
+  "rounded-lg border border-border bg-background px-3 py-2.5 text-foreground outline-none transition focus:border-primary focus:ring-1 focus:ring-primary";

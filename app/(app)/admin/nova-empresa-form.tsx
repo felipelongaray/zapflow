@@ -4,8 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 const inputClass =
-  "rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-foreground outline-none transition focus:border-accent focus:ring-1 focus:ring-accent";
-const labelClass = "text-sm font-medium text-foreground/80";
+  "rounded-lg border border-border bg-background px-3 py-2.5 text-foreground outline-none transition focus:border-primary focus:ring-1 focus:ring-primary";
+const labelClass = "text-sm font-medium text-foreground";
 
 export function NovaEmpresaForm() {
   const router = useRouter();
@@ -59,7 +59,7 @@ export function NovaEmpresaForm() {
       <button
         type="button"
         onClick={() => setAberto(true)}
-        className="rounded-lg bg-accent px-4 py-2.5 font-semibold text-[#0E1512] transition hover:brightness-95"
+        className="rounded-lg bg-primary px-4 py-2.5 font-semibold text-primary-foreground transition hover:bg-primary-hover"
       >
         Nova empresa
       </button>
@@ -69,10 +69,10 @@ export function NovaEmpresaForm() {
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex flex-col gap-5 rounded-xl border border-white/10 bg-white/5 p-5"
+      className="flex flex-col gap-5 rounded-xl border border-border bg-surface p-5"
     >
       <fieldset className="flex flex-col gap-3">
-        <legend className="mb-1 text-sm font-semibold text-foreground/50">
+        <legend className="mb-1 text-sm font-semibold text-muted">
           Empresa
         </legend>
         <div className="flex flex-col gap-1.5">
@@ -114,7 +114,7 @@ export function NovaEmpresaForm() {
       </fieldset>
 
       <fieldset className="flex flex-col gap-3">
-        <legend className="mb-1 text-sm font-semibold text-foreground/50">
+        <legend className="mb-1 text-sm font-semibold text-muted">
           Dono
         </legend>
         <div className="flex flex-col gap-1.5">
@@ -155,7 +155,7 @@ export function NovaEmpresaForm() {
       {erro && (
         <p
           role="alert"
-          className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300"
+          className="rounded-lg border border-danger/30 bg-danger-subtle px-3 py-2 text-sm text-danger"
         >
           {erro}
         </p>
@@ -165,7 +165,7 @@ export function NovaEmpresaForm() {
         <button
           type="submit"
           disabled={enviando}
-          className="rounded-lg bg-accent px-4 py-2.5 font-semibold text-[#0E1512] transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-lg bg-primary px-4 py-2.5 font-semibold text-primary-foreground transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
         >
           {enviando ? "Criando..." : "Criar empresa"}
         </button>
@@ -175,7 +175,7 @@ export function NovaEmpresaForm() {
             setErro(null);
             setAberto(false);
           }}
-          className="rounded-lg border border-white/15 px-4 py-2.5 font-medium text-foreground transition hover:bg-white/5"
+          className="rounded-lg border border-border px-4 py-2.5 font-medium text-foreground transition hover:bg-primary-subtle"
         >
           Cancelar
         </button>

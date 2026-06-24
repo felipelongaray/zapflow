@@ -67,7 +67,7 @@ export default async function EmpresaDetalhePage({
     <main className="mx-auto w-full max-w-3xl px-6 py-10">
       <Link
         href="/admin"
-        className="text-sm text-foreground/60 transition hover:text-foreground"
+        className="text-sm text-muted transition hover:text-foreground"
       >
         ← Empresas
       </Link>
@@ -75,15 +75,15 @@ export default async function EmpresaDetalhePage({
       <header className="mt-4 mb-8 flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">{empresa.nome}</h1>
-          <p className="mt-1 text-sm text-foreground/50">
+          <p className="mt-1 text-sm text-muted">
             Criada em {new Date(empresa.created_at).toLocaleDateString("pt-BR")}
           </p>
         </div>
         <span
           className={
             suspensa
-              ? "rounded-full bg-amber-400/15 px-3 py-1 text-xs font-medium text-amber-300"
-              : "rounded-full bg-accent/15 px-3 py-1 text-xs font-medium text-accent"
+              ? "rounded-full bg-warning-subtle px-3 py-1 text-xs font-medium text-warning"
+              : "rounded-full bg-success-subtle px-3 py-1 text-xs font-medium text-success"
           }
         >
           {empresa.status}
@@ -92,24 +92,24 @@ export default async function EmpresaDetalhePage({
 
       {/* Uso x limites */}
       <section className="grid grid-cols-2 gap-3">
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-          <p className="text-xs uppercase tracking-wide text-foreground/50">
+        <div className="rounded-xl border border-border bg-surface p-4">
+          <p className="text-xs uppercase tracking-wide text-muted">
             Canais
           </p>
           <p className="mt-1 text-lg font-semibold">
             {canaisCount ?? 0}{" "}
-            <span className="text-sm font-normal text-foreground/50">
+            <span className="text-sm font-normal text-muted">
               de {empresa.max_canais}
             </span>
           </p>
         </div>
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-          <p className="text-xs uppercase tracking-wide text-foreground/50">
+        <div className="rounded-xl border border-border bg-surface p-4">
+          <p className="text-xs uppercase tracking-wide text-muted">
             Usuários
           </p>
           <p className="mt-1 text-lg font-semibold">
             {usuariosCount ?? 0}{" "}
-            <span className="text-sm font-normal text-foreground/50">
+            <span className="text-sm font-normal text-muted">
               de {empresa.max_usuarios}
             </span>
           </p>
@@ -118,22 +118,22 @@ export default async function EmpresaDetalhePage({
 
       {/* Dono */}
       <section className="mt-6">
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-foreground/50">
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted">
           Dono
         </h2>
         {dono ? (
-          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+          <div className="rounded-xl border border-border bg-surface p-4">
             <p className="font-medium">{dono.nome ?? "—"}</p>
-            <p className="text-sm text-foreground/60">{donoEmail ?? "—"}</p>
+            <p className="text-sm text-muted">{donoEmail ?? "—"}</p>
           </div>
         ) : (
-          <p className="text-sm text-foreground/50">Sem dono cadastrado.</p>
+          <p className="text-sm text-muted">Sem dono cadastrado.</p>
         )}
       </section>
 
       {/* Funil */}
       <section className="mt-6">
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-foreground/50">
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted">
           Funil ({etapas?.length ?? 0} etapas)
         </h2>
         {etapas && etapas.length > 0 ? (
@@ -141,20 +141,20 @@ export default async function EmpresaDetalhePage({
             {etapas.map((et) => (
               <li
                 key={et.id}
-                className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm"
+                className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm"
               >
-                <span className="text-foreground/40">{et.ordem}.</span>{" "}
+                <span className="text-muted">{et.ordem}.</span>{" "}
                 {et.nome}
               </li>
             ))}
           </ol>
         ) : (
-          <p className="text-sm text-foreground/50">Nenhuma etapa.</p>
+          <p className="text-sm text-muted">Nenhuma etapa.</p>
         )}
       </section>
 
       {/* Ações (client) */}
-      <section className="mt-10 border-t border-white/10 pt-6">
+      <section className="mt-10 border-t border-border pt-6">
         <EmpresaAcoes
           empresa={{
             id: empresa.id,
