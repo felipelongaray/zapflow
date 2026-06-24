@@ -15,7 +15,7 @@ export default async function FunilPage() {
 
   const { data: perfil } = await supabase
     .from("perfis")
-    .select("empresa_id, is_super_admin, nome")
+    .select("empresa_id, is_super_admin, nome, papel")
     .eq("id", user.id)
     .single();
 
@@ -49,6 +49,7 @@ export default async function FunilPage() {
 
       <FunilBoard
         empresaId={perfil.empresa_id}
+        ehDono={perfil.papel === "dono"}
         etapas={(etapas as Etapa[]) ?? []}
         contatosIniciais={(contatos as Contato[]) ?? []}
       />

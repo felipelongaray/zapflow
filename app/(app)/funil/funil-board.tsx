@@ -33,21 +33,26 @@ const SEM_ETAPA = "sem-etapa";
 
 export function FunilBoard({
   empresaId,
-  etapas,
+  ehDono,
+  etapas: etapasIniciais,
   contatosIniciais,
 }: {
   empresaId: string;
+  ehDono: boolean;
   etapas: Etapa[];
   contatosIniciais: Contato[];
 }) {
   // Cliente Supabase do browser, estável entre renders.
   const [supabase] = useState(() => createClient());
+  // etapas e contatos viram estado para o board refletir as edições.
+  const [etapas, setEtapas] = useState<Etapa[]>(etapasIniciais);
   const [contatos, setContatos] = useState<Contato[]>(contatosIniciais);
   const [erro, setErro] = useState<string | null>(null);
 
-  // Modais: criação (com etapa inicial opcional) e edição de um contato.
+  // Modais: criação/edição de contato e gerenciamento de etapas (só dono).
   const [criarEm, setCriarEm] = useState<string | null | undefined>(undefined);
   const [emEdicao, setEmEdicao] = useState<Contato | null>(null);
+  const [gerenciarEtapas, setGerenciarEtapas] = useState(false);
 
   // No mobile, exige um pequeno "segurar" antes de arrastar para não atrapalhar
   // o scroll; no desktop, um pequeno deslocamento ativa o drag.
@@ -60,13 +65,19 @@ export function FunilBoard({
 
   const temSemEtapa = contatos.some((c) => c.etapa_id === null);
 
+  // Etapas sempre na ordem do campo `ordem` (reordenar muda só esse campo).
+  const etapasOrdenadas = useMemo(
+    () => [...etapas].sort((a, b) => a.ordem - b.ordem),
+    [etapas],
+  );
+
   // Colunas: "Sem etapa" (só se houver) + etapas na ordem definida.
   const colunas = useMemo(() => {
     const lista: { id: string; nome: string }[] = [];
     if (temSemEtapa) lista.push({ id: SEM_ETAPA, nome: "Sem etapa" });
-    for (const e of etapas) lista.push({ id: e.id, nome: e.nome });
+    for (const e of etapasOrdenadas) lista.push({ id: e.id, nome: e.nome });
     return lista;
-  }, [etapas, temSemEtapa]);
+  }, [etapasOrdenadas, temSemEtapa]);
 
   async function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
@@ -166,7 +177,69 @@ export function FunilBoard({
     return null;
   }
 
-  const etapaPadrao = etapas[0]?.id ?? "";
+  // -------------------------------------------------------------------------
+  // GESTÃO DE ETAPAS (só dono — UX; o RLS é a trava real). Todas as operações
+  // usam o cliente de sessão: o banco rejeita se quem chamar não for o dono.
+  // -------------------------------------------------------------------------
+  async function renomearEtapa(id: string, nome: string) {
+    const limpo = nome.trim();
+    const atual = etapas.find((e) => e.id === id);
+    if (!limpo || !atual || limpo === atual.nome) return null;
+    const { error } = await supabase
+      .from("etapas")
+      .update({ nome: limpo })
+      .eq("id", id);
+    if (error) return "Não foi possível renomear a etapa.";
+    setEtapas((prev) => prev.map((e) => (e.id === id ? { ...e, nome: limpo } : e)));
+    return null;
+  }
+
+  async function adicionarEtapa(nome: string) {
+    const limpo = nome.trim();
+    if (!limpo) return "Informe um nome para a etapa.";
+    const proximaOrdem =
+      etapas.reduce((m, e) => Math.max(m, e.ordem), -1) + 1;
+    const { data, error } = await supabase
+      .from("etapas")
+      .insert({ empresa_id: empresaId, nome: limpo, ordem: proximaOrdem })
+      .select("id, nome, ordem")
+      .single();
+    if (error || !data) return "Não foi possível adicionar a etapa.";
+    setEtapas((prev) => [...prev, data as Etapa]);
+    return null;
+  }
+
+  async function removerEtapa(id: string) {
+    const { error } = await supabase.from("etapas").delete().eq("id", id);
+    if (error) return "Não foi possível remover a etapa.";
+    setEtapas((prev) => prev.filter((e) => e.id !== id));
+    // Reflete o on delete set null: contatos da etapa ficam sem etapa.
+    setContatos((prev) =>
+      prev.map((c) => (c.etapa_id === id ? { ...c, etapa_id: null } : c)),
+    );
+    return null;
+  }
+
+  // Move uma etapa para cima/baixo trocando o campo `ordem` com a vizinha.
+  async function moverEtapa(id: string, dir: -1 | 1) {
+    const i = etapasOrdenadas.findIndex((e) => e.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= etapasOrdenadas.length) return null;
+    const a = etapasOrdenadas[i];
+    const b = etapasOrdenadas[j];
+    const [oa, ob] = [a.ordem, b.ordem];
+    const r1 = await supabase.from("etapas").update({ ordem: ob }).eq("id", a.id);
+    const r2 = await supabase.from("etapas").update({ ordem: oa }).eq("id", b.id);
+    if (r1.error || r2.error) return "Não foi possível reordenar.";
+    setEtapas((prev) =>
+      prev.map((e) =>
+        e.id === a.id ? { ...e, ordem: ob } : e.id === b.id ? { ...e, ordem: oa } : e,
+      ),
+    );
+    return null;
+  }
+
+  const etapaPadrao = etapasOrdenadas[0]?.id ?? "";
 
   return (
     <div className="flex flex-1 flex-col">
@@ -174,13 +247,24 @@ export function FunilBoard({
         <h2 className="text-sm font-semibold uppercase tracking-wide text-foreground/50">
           Contatos
         </h2>
-        <button
-          type="button"
-          onClick={() => setCriarEm(etapaPadrao || null)}
-          className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-[#0E1512] transition hover:brightness-95"
-        >
-          + Novo contato
-        </button>
+        <div className="flex gap-2">
+          {ehDono && (
+            <button
+              type="button"
+              onClick={() => setGerenciarEtapas(true)}
+              className="rounded-lg border border-white/15 px-3 py-2 text-sm font-medium transition hover:bg-white/5"
+            >
+              Gerenciar funil
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setCriarEm(etapaPadrao || null)}
+            className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-[#0E1512] transition hover:brightness-95"
+          >
+            + Novo contato
+          </button>
+        </div>
       </div>
 
       {erro && (
@@ -224,7 +308,7 @@ export function FunilBoard({
 
       {criarEm !== undefined && (
         <CriarContatoModal
-          etapas={etapas}
+          etapas={etapasOrdenadas}
           etapaInicial={criarEm}
           onFechar={() => setCriarEm(undefined)}
           onCriar={criarContato}
@@ -237,6 +321,18 @@ export function FunilBoard({
           onFechar={() => setEmEdicao(null)}
           onSalvar={salvarContato}
           onExcluir={excluirContato}
+        />
+      )}
+
+      {gerenciarEtapas && (
+        <GerenciarEtapasModal
+          etapas={etapasOrdenadas}
+          contatos={contatos}
+          onFechar={() => setGerenciarEtapas(false)}
+          onRenomear={renomearEtapa}
+          onAdicionar={adicionarEtapa}
+          onRemover={removerEtapa}
+          onMover={moverEtapa}
         />
       )}
     </div>
@@ -532,6 +628,185 @@ function EditarContatoModal({
   );
 }
 
+function GerenciarEtapasModal({
+  etapas,
+  contatos,
+  onFechar,
+  onRenomear,
+  onAdicionar,
+  onRemover,
+  onMover,
+}: {
+  etapas: Etapa[];
+  contatos: Contato[];
+  onFechar: () => void;
+  onRenomear: (id: string, nome: string) => Promise<string | null>;
+  onAdicionar: (nome: string) => Promise<string | null>;
+  onRemover: (id: string) => Promise<string | null>;
+  onMover: (id: string, dir: -1 | 1) => Promise<string | null>;
+}) {
+  const [erro, setErro] = useState<string | null>(null);
+  const [novoNome, setNovoNome] = useState("");
+  const [confirmando, setConfirmando] = useState<string | null>(null);
+  const [ocupado, setOcupado] = useState(false);
+
+  function contagem(etapaId: string) {
+    return contatos.filter((c) => c.etapa_id === etapaId).length;
+  }
+
+  async function executar(fn: () => Promise<string | null>) {
+    setOcupado(true);
+    setErro(null);
+    const msg = await fn();
+    setOcupado(false);
+    if (msg) setErro(msg);
+    return msg;
+  }
+
+  async function handleAdicionar() {
+    const msg = await executar(() => onAdicionar(novoNome));
+    if (!msg) setNovoNome("");
+  }
+
+  return (
+    <Modal titulo="Gerenciar etapas" onFechar={onFechar}>
+      <div className="flex flex-col gap-2.5">
+        {etapas.length === 0 && (
+          <p className="rounded-lg border border-[#243029] bg-[#141D18] px-3 py-4 text-center text-sm text-foreground/50">
+            Nenhuma etapa ainda.
+          </p>
+        )}
+
+        {etapas.map((etapa, i) => {
+          const qtd = contagem(etapa.id);
+          const confirmandoEsta = confirmando === etapa.id;
+          return (
+            <div
+              key={etapa.id}
+              className="rounded-lg border border-[#243029] bg-[#141D18] p-3"
+            >
+              <div className="flex items-center gap-3">
+                <div className="flex shrink-0 flex-col text-foreground/35">
+                  <button
+                    type="button"
+                    aria-label="Subir etapa"
+                    disabled={i === 0 || ocupado}
+                    onClick={() => executar(() => onMover(etapa.id, -1))}
+                    className="text-[10px] leading-tight transition hover:text-accent disabled:opacity-25"
+                  >
+                    ▲
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Descer etapa"
+                    disabled={i === etapas.length - 1 || ocupado}
+                    onClick={() => executar(() => onMover(etapa.id, 1))}
+                    className="text-[10px] leading-tight transition hover:text-accent disabled:opacity-25"
+                  >
+                    ▼
+                  </button>
+                </div>
+
+                <input
+                  type="text"
+                  defaultValue={etapa.nome}
+                  onBlur={(e) => executar(() => onRenomear(etapa.id, e.target.value))}
+                  className={`${inputClass} min-w-0 flex-1`}
+                />
+
+                <span
+                  title={`${qtd} contato(s)`}
+                  className="shrink-0 rounded-full bg-white/5 px-2 py-0.5 text-xs tabular-nums text-foreground/50"
+                >
+                  {qtd}
+                </span>
+
+                <button
+                  type="button"
+                  aria-label="Remover etapa"
+                  onClick={() => {
+                    setErro(null);
+                    setConfirmando(etapa.id);
+                  }}
+                  className="shrink-0 rounded-md p-1.5 text-foreground/40 transition hover:bg-red-500/10 hover:text-red-300"
+                >
+                  <IconeLixeira />
+                </button>
+              </div>
+
+              {confirmandoEsta && (
+                <div className="mt-2 rounded-md border border-amber-400/30 bg-amber-400/10 p-2.5 text-sm">
+                  {qtd > 0 ? (
+                    <p className="text-amber-200">
+                      Esta etapa tem {qtd} contato(s). Eles ficarão sem etapa.
+                    </p>
+                  ) : (
+                    <p className="text-foreground/70">Remover esta etapa?</p>
+                  )}
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      disabled={ocupado}
+                      onClick={async () => {
+                        const msg = await executar(() => onRemover(etapa.id));
+                        if (!msg) setConfirmando(null);
+                      }}
+                      className="rounded-md bg-red-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-600 disabled:opacity-60"
+                    >
+                      Confirmar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmando(null)}
+                      className="rounded-md border border-white/15 px-3 py-1.5 text-xs font-medium transition hover:bg-white/5"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Adicionar nova etapa (vai para o fim da ordem). */}
+      <div className="mt-5 border-t border-[#243029] pt-4">
+        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-foreground/40">
+          Nova etapa
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={novoNome}
+            onChange={(e) => setNovoNome(e.target.value)}
+            placeholder="Ex: Proposta enviada"
+            className={`${inputClass} min-w-0 flex-1`}
+          />
+          <button
+            type="button"
+            disabled={ocupado || !novoNome.trim()}
+            onClick={handleAdicionar}
+            className="shrink-0 rounded-lg bg-accent px-4 py-2.5 font-semibold text-[#0E1512] transition hover:brightness-95 disabled:opacity-50"
+          >
+            Adicionar
+          </button>
+        </div>
+      </div>
+
+      {erro && (
+        <div className="mt-3">
+          <ErroMsg mensagem={erro} />
+        </div>
+      )}
+
+      <div className="mt-5 flex justify-end">
+        <BotaoCancelar onClick={onFechar} />
+      </div>
+    </Modal>
+  );
+}
+
 function Modal({
   titulo,
   onFechar,
@@ -639,6 +914,28 @@ function IconeEditar() {
     >
       <path d="M12 20h9" />
       <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+
+function IconeLixeira() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 6h18" />
+      <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
     </svg>
   );
 }
