@@ -48,6 +48,12 @@ export default async function FunilPage() {
           <p className="text-xs text-muted">Funil de atendimento</p>
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            href="/conversas"
+            className="rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground transition hover:bg-primary-subtle"
+          >
+            Conversas
+          </Link>
           {ehDono && (
             <Link
               href="/equipe"
