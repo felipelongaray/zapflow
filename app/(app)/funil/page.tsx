@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { SignOutButton } from "../inicio/sign-out-button";
@@ -22,6 +23,8 @@ export default async function FunilPage() {
   if (perfil?.is_super_admin) redirect("/admin");
   if (!perfil?.empresa_id) redirect("/inicio");
 
+  const ehDono = perfil.papel === "dono";
+
   // RLS já isola por empresa: estas queries retornam apenas as linhas da empresa
   // do usuário. Não precisamos (nem devemos) filtrar por empresa_id na mão.
   const [{ data: etapas }, { data: contatos }] = await Promise.all([
@@ -44,12 +47,22 @@ export default async function FunilPage() {
           </h1>
           <p className="text-xs text-muted">Funil de atendimento</p>
         </div>
-        <SignOutButton />
+        <div className="flex items-center gap-2">
+          {ehDono && (
+            <Link
+              href="/equipe"
+              className="rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground transition hover:bg-primary-subtle"
+            >
+              Equipe
+            </Link>
+          )}
+          <SignOutButton />
+        </div>
       </header>
 
       <FunilBoard
         empresaId={perfil.empresa_id}
-        ehDono={perfil.papel === "dono"}
+        ehDono={ehDono}
         etapas={(etapas as Etapa[]) ?? []}
         contatosIniciais={(contatos as Contato[]) ?? []}
       />
