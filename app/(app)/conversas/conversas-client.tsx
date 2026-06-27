@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 
 export type Conversa = {
   id: string;
@@ -33,6 +34,14 @@ export function ConversasClient({
   const [texto, setTexto] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+
+  // HIDRATAÇÃO: os horários são formatados com locale/timezone (toLocale*), que
+  // diferem entre o SERVIDOR (UTC na Vercel) e o BROWSER (TZ local, ex.: BRT).
+  // Renderizar isso no SSR gera "text content mismatch" (React #418) ao hidratar
+  // EM PRODUÇÃO — em dev não aparece porque server e browser são a mesma máquina
+  // (mesmo fuso). Só formatamos a hora APÓS montar no cliente: assim o servidor e
+  // o 1º render do cliente produzem o MESMO HTML, e o mismatch deixa de existir.
+  const [montado, setMontado] = useState(false);
 
   const fimRef = useRef<HTMLDivElement | null>(null);
 
@@ -76,9 +85,88 @@ export function ConversasClient({
   }, [mensagens]);
 
   // Rola para a mensagem mais recente ao trocar de conversa ou receber nova.
+  // Continua disparando quando a contagem de mensagensDaConversa muda — inclusive
+  // para as mensagens que chegam via Realtime.
   useEffect(() => {
     fimRef.current?.scrollIntoView({ behavior: "auto" });
   }, [selecionada, mensagensDaConversa.length]);
+
+  // Marca que já montou no cliente — habilita a formatação de hora (ver acima).
+  useEffect(() => {
+    setMontado(true);
+  }, []);
+
+  // Cliente de SESSÃO do browser: anon key + JWT do usuário (cookies). O Realtime
+  // roda sob esse JWT, então o RLS de `mensagens` filtra os eventos por
+  // empresa_id — o browser só recebe INSERTs do próprio tenant e NUNCA usa
+  // service_role. Criado uma única vez (inicializador do useState) para manter a
+  // referência estável entre renders.
+  const [supabase] = useState(() => createClient());
+
+  // REALTIME: ouve INSERTs em public.mensagens (já incluída na publication
+  // supabase_realtime + replica identity full pela migration 015, feita fora deste
+  // fluxo) e injeta a mensagem nova no estado, sem reload. Cobre tanto as
+  // RECEBIDAS via webhook quanto as ENVIADAS (que também voltam pelo INSERT).
+  useEffect(() => {
+    const channel = supabase
+      .channel("mensagens-inserts")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "mensagens" },
+        (payload) => {
+          const row = payload.new as {
+            id: string;
+            conversa_id: string;
+            direcao: "entrada" | "saida";
+            conteudo: string | null;
+            status: string | null;
+            created_at: string;
+          };
+          const nova: Mensagem = {
+            id: row.id,
+            conversaId: row.conversa_id,
+            direcao: row.direcao,
+            conteudo: row.conteudo ?? "",
+            status: row.status ?? null,
+            createdAt: row.created_at,
+          };
+
+          setMensagens((prev) => {
+            // 1) Já temos a mensagem pelo ID real (a reconciliação do envio
+            //    otimista já rodou): não duplica.
+            if (prev.some((m) => m.id === nova.id)) return prev;
+
+            // 2) Corrida: o evento Realtime chegou ANTES da resposta da rota de
+            //    envio reconciliar o provisório. Casa o otimista ainda não
+            //    reconciliado (id "temp-", mesma conversa/direção/conteúdo) e o
+            //    substitui no lugar — em vez de adicionar uma segunda cópia.
+            const idxProvisorio = prev.findIndex(
+              (m) =>
+                m.id.startsWith("temp-") &&
+                m.conversaId === nova.conversaId &&
+                m.direcao === nova.direcao &&
+                m.conteudo === nova.conteudo,
+            );
+            if (idxProvisorio !== -1) {
+              const copia = [...prev];
+              copia[idxProvisorio] = nova;
+              return copia;
+            }
+
+            // 3) Mensagem genuinamente nova (recebida via webhook, ou enviada de
+            //    outra aba/sessão): adiciona.
+            return [...prev, nova];
+          });
+        },
+      )
+      .subscribe();
+
+    // Cleanup OBRIGATÓRIO: sem remover o channel, remontagens/navegação acumulam
+    // subscriptions e os eventos passam a chegar (e duplicar) várias vezes.
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [supabase]);
 
   async function enviar(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -148,7 +236,15 @@ export function ConversasClient({
       status: mensagem.status ?? null,
       createdAt: mensagem.createdAt,
     };
-    setMensagens((prev) => prev.map((m) => (m.id === tempId ? real : m)));
+    setMensagens((prev) => {
+      // Se o evento Realtime já injetou a versão real desta mensagem (corrida em
+      // que o INSERT chegou antes desta resposta), apenas descarta o provisório.
+      // Caso contrário, troca o temp pelo real. Em ambos os casos não duplica.
+      if (prev.some((m) => m.id === real.id)) {
+        return prev.filter((m) => m.id !== tempId);
+      }
+      return prev.map((m) => (m.id === tempId ? real : m));
+    });
     setConversas((prev) =>
       prev.map((c) =>
         c.id === conversaId
@@ -199,7 +295,7 @@ export function ConversasClient({
                         {c.contatoNome ?? c.contatoTelefone ?? "Sem nome"}
                       </p>
                       <span className="shrink-0 text-xs text-muted">
-                        {formatarHora(c.ultimaMensagemEm)}
+                        {montado ? formatarHora(c.ultimaMensagemEm) : ""}
                       </span>
                     </div>
                     <p className="truncate text-sm text-muted">
@@ -256,7 +352,7 @@ export function ConversasClient({
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
               <div className="mx-auto flex max-w-2xl flex-col gap-2">
                 {mensagensDaConversa.map((m) => (
-                  <Balao key={m.id} mensagem={m} />
+                  <Balao key={m.id} mensagem={m} montado={montado} />
                 ))}
                 <div ref={fimRef} />
               </div>
@@ -299,7 +395,13 @@ export function ConversasClient({
   );
 }
 
-function Balao({ mensagem }: { mensagem: Mensagem }) {
+function Balao({
+  mensagem,
+  montado,
+}: {
+  mensagem: Mensagem;
+  montado: boolean;
+}) {
   const saida = mensagem.direcao === "saida";
   return (
     <div className={`flex ${saida ? "justify-end" : "justify-start"}`}>
@@ -316,7 +418,7 @@ function Balao({ mensagem }: { mensagem: Mensagem }) {
             saida ? "text-primary-foreground/70" : "text-muted"
           }`}
         >
-          {formatarHora(mensagem.createdAt)}
+          {montado ? formatarHora(mensagem.createdAt) : ""}
         </p>
       </div>
     </div>
