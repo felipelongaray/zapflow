@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
 
 export type Conversa = {
   id: string;
@@ -20,15 +19,12 @@ export type Mensagem = {
 };
 
 export function ConversasClient({
-  empresaId,
   conversasIniciais,
   mensagensIniciais,
 }: {
-  empresaId: string;
   conversasIniciais: Conversa[];
   mensagensIniciais: Mensagem[];
 }) {
-  const [supabase] = useState(() => createClient());
   const [conversas, setConversas] = useState<Conversa[]>(conversasIniciais);
   const [mensagens, setMensagens] = useState<Mensagem[]>(mensagensIniciais);
   const [selecionada, setSelecionada] = useState<string | null>(
@@ -112,51 +108,47 @@ export function ConversasClient({
     setErro(null);
     setEnviando(true);
 
-    // Persiste no banco via cliente de SESSÃO. O RLS (WITH CHECK empresa_id =
-    // get_minha_empresa()) garante que só dá para gravar na própria empresa;
-    // empresa_id vem do perfil resolvido no servidor (prop), não do usuário.
-    //
-    // >>> INTEGRAÇÃO REAL DO WHATSAPP ENTRA AQUI <<<
-    // Hoje a mensagem só é PERSISTIDA e exibida. No futuro, após o insert (ou via
-    // um Route Handler no servidor), chamaríamos a API do provedor (ex.: Cloud
-    // API / BSP) para de fato ENVIAR ao número do contato, e atualizaríamos
-    // `status` conforme os callbacks (enviada -> entregue -> lida).
-    const { data, error } = await supabase
-      .from("mensagens")
-      .insert({
-        empresa_id: empresaId,
-        conversa_id: conversaId,
-        direcao: "saida",
-        conteudo,
-        status: "enviada",
-      })
-      .select("id, conversa_id, direcao, conteudo, status, created_at")
-      .single();
-
-    if (error || !data) {
-      // Rollback do otimista.
+    // >>> INTEGRAÇÃO REAL DO WHATSAPP <<<
+    // O envio acontece NO SERVIDOR (Route Handler), nunca aqui: é lá que o
+    // access_token do canal é lido e a Graph API do Meta é chamada. O cliente só
+    // dispara a ação e renderiza o resultado — o token nunca chega ao browser.
+    // O servidor também valida a empresa (RLS) e a janela de 24h.
+    let resposta: Response;
+    try {
+      resposta = await fetch(`/api/conversas/${conversaId}/enviar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conteudo }),
+      });
+    } catch {
       setMensagens((prev) => prev.filter((m) => m.id !== tempId));
-      setErro("Não foi possível enviar a mensagem. Tente novamente.");
+      setErro("Falha de conexão. Tente novamente.");
       setEnviando(false);
       return;
     }
 
-    // Reconcilia o id/timestamp reais.
+    if (!resposta.ok) {
+      // Rollback do otimista e mensagem amigável (inclui o caso da janela de 24h
+      // fechada, que vem com status 422 do servidor).
+      const dados = await resposta.json().catch(() => ({}));
+      setMensagens((prev) => prev.filter((m) => m.id !== tempId));
+      setErro(dados.error ?? "Não foi possível enviar a mensagem.");
+      setEnviando(false);
+      return;
+    }
+
+    const { mensagem } = await resposta.json();
+
+    // Reconcilia o otimista com a mensagem real persistida pelo servidor.
     const real: Mensagem = {
-      id: data.id as string,
-      conversaId: data.conversa_id as string,
-      direcao: data.direcao as "entrada" | "saida",
-      conteudo: data.conteudo ?? "",
-      status: (data.status as string) ?? null,
-      createdAt: data.created_at as string,
+      id: mensagem.id,
+      conversaId: mensagem.conversaId,
+      direcao: mensagem.direcao,
+      conteudo: mensagem.conteudo ?? "",
+      status: mensagem.status ?? null,
+      createdAt: mensagem.createdAt,
     };
     setMensagens((prev) => prev.map((m) => (m.id === tempId ? real : m)));
-
-    // Atualiza ultima_mensagem_em da conversa (ordenação da lista). RLS protege.
-    await supabase
-      .from("conversas")
-      .update({ ultima_mensagem_em: real.createdAt })
-      .eq("id", conversaId);
     setConversas((prev) =>
       prev.map((c) =>
         c.id === conversaId

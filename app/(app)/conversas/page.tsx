@@ -97,7 +97,6 @@ export default async function ConversasPage() {
       </header>
 
       <ConversasClient
-        empresaId={perfil.empresa_id}
         conversasIniciais={conversas}
         mensagensIniciais={mensagens}
       />

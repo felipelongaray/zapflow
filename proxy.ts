@@ -16,11 +16,13 @@ export const config = {
   matcher: [
     /*
      * Casa com todas as rotas, EXCETO:
+     * - api/webhooks (webhooks externos, ex.: Meta — não têm sessão de usuário e
+     *   se autenticam por assinatura; não podem ser redirecionados para /login)
      * - _next/static (arquivos estáticos)
      * - _next/image (otimização de imagem)
      * - favicon.ico e arquivos de imagem comuns
-     * Sem essas exclusões, a lógica de auth bloquearia CSS/JS/imagens.
+     * Sem essas exclusões, a lógica de auth bloquearia CSS/JS/imagens/webhooks.
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!api/webhooks|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };
