@@ -94,7 +94,9 @@ export async function POST(
     }
   }
 
-  // Telefone do contato, normalizado para dígitos com DDI 55 (formato do Meta).
+  // Telefone do contato no formato canônico (13 díg com o nono dígito p/ celular
+  // BR): telefoneParaArmazenamento delega a normalizarWhatsApp. O Meta aceita e
+  // roteia esse formato. Mesma canonicalização do funil e do webhook.
   const contato = Array.isArray(conversa.contato)
     ? conversa.contato[0]
     : conversa.contato;

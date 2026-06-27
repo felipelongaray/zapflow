@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { normalizarWhatsApp } from "@/lib/telefone";
 
 // Webhook do WhatsApp Cloud API (Meta).
 //   GET  -> handshake de verificação do webhook (hub.challenge).
@@ -153,8 +154,12 @@ async function processarMensagens(
 
   for (const msg of value.messages ?? []) {
     const metaId = msg.id;
-    const waId = msg.from; // telefone do cliente em dígitos com DDI.
+    const waId = msg.from; // telefone do cliente em dígitos com DDI (cru do Meta).
     if (!waId) continue;
+    // Canoniza para o MESMO formato do funil (13 díg com o nono dígito p/ celular
+    // BR). O `wa_id` de celular costuma chegar SEM o 9; sem isso, o webhook criaria
+    // um contato divergente do criado manualmente.
+    const telefoneCanonico = normalizarWhatsApp(waId);
 
     // IDEMPOTÊNCIA: o Meta pode reentregar. Se já temos essa mensagem, pula.
     if (metaId) {
@@ -183,7 +188,7 @@ async function processarMensagens(
       admin,
       empresaId,
       canalId,
-      waId,
+      telefoneCanonico,
       nomePorWaId.get(waId) ?? null,
     );
     if (!contatoId) continue;

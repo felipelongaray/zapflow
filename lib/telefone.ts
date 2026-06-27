@@ -67,15 +67,45 @@ export function telefoneParaExibicao(armazenado: string): string {
   return formatarNacional(nacional(armazenado));
 }
 
-// String mascarada (nacional) -> valor de armazenamento (55 + dígitos).
-export function telefoneParaArmazenamento(display: string): string {
-  const d = apenasDigitos(display);
-  // Já inclui o código do país (12/13 dígitos começando com 55): não duplica.
-  if (d.length > 11 && d.startsWith("55")) {
-    return d;
+// Canonicaliza qualquer número (vindo do Meta/wa_id, do funil, etc.) para o
+// formato ARMAZENADO único: apenas dígitos, com DDI 55 + DDD + assinante, SEMPRE
+// com o nono dígito quando for celular. Resolve a divergência entre o webhook
+// (o `wa_id` de celular BR costuma chegar SEM o 9) e o funil (salva com o 9), de
+// modo que os dois caminhos convirjam para o MESMO valor canônico.
+//
+// Exemplos:
+//   "555198917769"   (12 díg, celular sem 9)   -> "5551998917769" (13 díg)
+//   "5551998917769"  (13 díg, já correto)      -> "5551998917769" (inalterado)
+//   "555133334444"   (fixo 8 díg começa com 3) -> "555133334444"  (mantém sem 9)
+//   "5198917769"     (sem DDI)                 -> "5551998917769"
+//   ""               (vazio)                   -> "" (melhor esforço, sem lançar)
+export function normalizarWhatsApp(input: string): string {
+  const d = apenasDigitos(input);
+  if (!d) return "";
+
+  // Garante o DDI 55. Usa o COMPRIMENTO para desambiguar DDD 55 (ex.: RS) de
+  // DDI 55: 12/13 dígitos começando com 55 já têm DDI; caso contrário, adiciona.
+  const comDdi = d.length > 11 && d.startsWith("55") ? d : `55${d}`;
+
+  const ddd = comDdi.slice(2, 4);
+  const assinante = comDdi.slice(4);
+  // Curto demais para inferir (DDD/assinante incompletos): melhor esforço.
+  if (ddd.length < 2 || assinante.length === 0) return comDdi;
+
+  // Celular sem o nono dígito: 8 dígitos começando em 6-9 -> reinsere o 9.
+  // Fixo (8 dígitos começando 2-5) NÃO recebe o 9; celular já com 9 fica igual.
+  if (assinante.length === 8 && /[6-9]/.test(assinante.charAt(0))) {
+    return `55${ddd}9${assinante}`;
   }
-  // Caso normal: usuário digitou só DDD + número -> adiciona o 55.
-  return `55${d}`;
+
+  return comDdi;
+}
+
+// String mascarada (nacional) -> valor de armazenamento canônico (55 + dígitos,
+// com o nono dígito quando celular). Delega à normalização única para que funil
+// e webhook produzam exatamente o mesmo formato.
+export function telefoneParaArmazenamento(display: string): string {
+  return normalizarWhatsApp(display);
 }
 
 // Valida: DDD válido + número com 8 (fixo) ou 9 (celular) dígitos. Celular deve
