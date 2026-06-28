@@ -161,7 +161,12 @@ async function processarMensagens(
     // um contato divergente do criado manualmente.
     const telefoneCanonico = normalizarWhatsApp(waId);
 
-    // IDEMPOTÊNCIA: o Meta pode reentregar. Se já temos essa mensagem, pula.
+    // IDEMPOTÊNCIA: o Meta REENTREGA o mesmo webhook se não receber 200 rápido,
+    // então o mesmo meta_message_id (wamid) pode chegar 2x. Sem unique em
+    // meta_message_id (decisão: não criamos constraint aqui — seria banco/seu
+    // lado), o pré-select abaixo cobre o caso comum (reentregas sequenciais):
+    // se já gravamos essa mensagem, pula. O INSERT mais abaixo ainda tolera o
+    // 23505 caso uma unique em meta_message_id passe a existir no futuro.
     if (metaId) {
       const { data: jaExiste } = await admin
         .from("mensagens")
@@ -203,7 +208,7 @@ async function processarMensagens(
     if (!conversaId) continue;
 
     // Insere a mensagem de ENTRADA.
-    await admin.from("mensagens").insert({
+    const { error: msgError } = await admin.from("mensagens").insert({
       empresa_id: empresaId,
       conversa_id: conversaId,
       direcao: "entrada",
@@ -212,6 +217,18 @@ async function processarMensagens(
       meta_message_id: metaId ?? null,
       created_at: createdAt,
     });
+
+    if (msgError) {
+      // 23505 (unique_violation) só ocorreria se uma unique em meta_message_id
+      // existisse: nesse caso é uma reentrega já gravada -> ignora silenciosamente.
+      // Qualquer outro erro: loga e segue sem renovar a janela (não persistiu).
+      if (msgError.code !== "23505") {
+        console.error(
+          `[whatsapp:webhook] falha ao inserir mensagem (empresa=${empresaId}): ${msgError.message}`,
+        );
+      }
+      continue;
+    }
 
     // REGRA DA JANELA: uma mensagem de ENTRADA abre/renova a janela de 24h.
     // Também atualiza a ordenação da lista de conversas.
@@ -251,6 +268,18 @@ async function processarStatuses(
   }
 }
 
+// CONTATO — "acha ou cria" ATÔMICO via UPSERT na unique contatos_empresa_telefone_uniq
+// (empresa_id, telefone). O `telefone` JÁ chega canonicalizado em 13 dígitos
+// (normalizarWhatsApp no chamador), casando com o formato da constraint.
+//
+// Race condition: quando o Meta dispara várias mensagens do mesmo número em
+// paralelo, vários requests tentam criar o mesmo contato. Com o UPSERT, só um
+// INSERT vence; os demais caem em DO NOTHING (ignoreDuplicates) em vez de
+// estourar 23505. Depois SEMPRE recuperamos o id pela chave canônica — seja a
+// linha recém-criada ou a pré-existente.
+//
+// ignoreDuplicates (DO NOTHING) de propósito: NÃO sobrescrevemos nome/canal_id de
+// um contato que já existe — uma reentrega sem nome não pode apagar o nome salvo.
 async function acharOuCriarContato(
   admin: Admin,
   empresaId: string,
@@ -258,7 +287,27 @@ async function acharOuCriarContato(
   telefone: string,
   nome: string | null,
 ): Promise<string | null> {
-  const { data: existente } = await admin
+  const { error: upsertError } = await admin
+    .from("contatos")
+    .upsert(
+      {
+        empresa_id: empresaId,
+        canal_id: canalId,
+        nome,
+        telefone,
+      },
+      { onConflict: "empresa_id,telefone", ignoreDuplicates: true },
+    );
+
+  if (upsertError) {
+    // Não retornamos já: o select abaixo ainda pode achar a linha (ex.: corrida).
+    console.error(
+      `[whatsapp:webhook] upsert de contato falhou (empresa=${empresaId}): ${upsertError.message}`,
+    );
+  }
+
+  // Recupera o id pela chave única canônica (novo OU pré-existente).
+  const { data, error } = await admin
     .from("contatos")
     .select("id")
     .eq("empresa_id", empresaId)
@@ -266,47 +315,53 @@ async function acharOuCriarContato(
     .limit(1)
     .maybeSingle();
 
-  if (existente) return existente.id as string;
-
-  const { data: criado, error } = await admin
-    .from("contatos")
-    .insert({
-      empresa_id: empresaId,
-      canal_id: canalId,
-      nome,
-      telefone,
-    })
-    .select("id")
-    .single();
-
-  if (error || !criado) {
+  if (error || !data) {
     console.error(
-      `[whatsapp:webhook] falha ao criar contato (empresa=${empresaId}): ${
+      `[whatsapp:webhook] não recuperou contato (empresa=${empresaId}): ${
         error?.message ?? "sem dados"
       }`,
     );
     return null;
   }
-  return criado.id as string;
+  return data.id as string;
 }
 
+// Seleciona a conversa ABERTA do contato (respeita o partial unique index
+// conversas_contato_aberta_uniq: no máx. UMA 'aberta' por contato, sem escopo de
+// canal). Retorna null se não houver nenhuma aberta.
+async function selecionarConversaAberta(
+  admin: Admin,
+  empresaId: string,
+  contatoId: string,
+): Promise<string | null> {
+  const { data } = await admin
+    .from("conversas")
+    .select("id")
+    .eq("empresa_id", empresaId)
+    .eq("contato_id", contatoId)
+    .eq("status", "aberta")
+    .limit(1)
+    .maybeSingle();
+  return (data?.id as string) ?? null;
+}
+
+// CONVERSA — garante no máximo UMA conversa 'aberta' por contato.
+//
+// NÃO uso upsert/onConflict aqui: o supabase-js mapeia onConflict para uma
+// constraint/índice COMPLETO, e a nossa unicidade é um PARTIAL index (WHERE
+// status = 'aberta'), que o onConflict não endereça de forma confiável. Então a
+// abordagem é: (1) procura a aberta; (2) se não houver, tenta inserir; (3) se a
+// inserção bater no partial unique index por uma corrida (Postgres 23505 =
+// unique_violation), re-seleciona a aberta que o request concorrente acabou de
+// criar — em vez de propagar o erro.
 async function acharOuCriarConversa(
   admin: Admin,
   empresaId: string,
   canalId: string,
   contatoId: string,
 ): Promise<string | null> {
-  const { data: existente } = await admin
-    .from("conversas")
-    .select("id")
-    .eq("empresa_id", empresaId)
-    .eq("canal_id", canalId)
-    .eq("contato_id", contatoId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (existente) return existente.id as string;
+  const existente = await selecionarConversaAberta(admin, empresaId, contatoId);
+  if (existente) return existente;
 
   const { data: criada, error } = await admin
     .from("conversas")
@@ -319,15 +374,25 @@ async function acharOuCriarConversa(
     .select("id")
     .single();
 
-  if (error || !criada) {
-    console.error(
-      `[whatsapp:webhook] falha ao criar conversa (empresa=${empresaId}): ${
-        error?.message ?? "sem dados"
-      }`,
+  if (!error && criada) return criada.id as string;
+
+  // Corrida: outro request criou a 'aberta' no mesmo instante e o partial unique
+  // index rejeitou esta inserção. Recupera a conversa vencedora.
+  if (error?.code === "23505") {
+    const reSelecionada = await selecionarConversaAberta(
+      admin,
+      empresaId,
+      contatoId,
     );
-    return null;
+    if (reSelecionada) return reSelecionada;
   }
-  return criada.id as string;
+
+  console.error(
+    `[whatsapp:webhook] falha ao criar conversa (empresa=${empresaId}): ${
+      error?.message ?? "sem dados"
+    }`,
+  );
+  return null;
 }
 
 // ---------------------------------------------------------------------------
