@@ -1,6 +1,11 @@
 import crypto from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { normalizarWhatsApp } from "@/lib/telefone";
+import {
+  extrairMidiaWebhook,
+  persistirMidiaRecebida,
+  type TipoMensagemDb,
+} from "@/lib/whatsapp/midia";
 
 // Webhook do WhatsApp Cloud API (Meta).
 //   GET  -> handshake de verificação do webhook (hub.challenge).
@@ -114,7 +119,7 @@ async function processar(payload: MetaWebhookPayload) {
 
       const { data: canal } = await admin
         .from("canais")
-        .select("id, empresa_id")
+        .select("id, empresa_id, access_token")
         .eq("phone_number_id", phoneNumberId)
         .limit(1)
         .maybeSingle();
@@ -128,7 +133,13 @@ async function processar(payload: MetaWebhookPayload) {
       }
 
       if (value.messages?.length) {
-        await processarMensagens(admin, canal.empresa_id, canal.id, value);
+        await processarMensagens(
+          admin,
+          canal.empresa_id,
+          canal.id,
+          (canal.access_token as string | null) ?? null,
+          value,
+        );
       }
       if (value.statuses?.length) {
         await processarStatuses(admin, canal.empresa_id, value);
@@ -144,6 +155,7 @@ async function processarMensagens(
   admin: Admin,
   empresaId: string,
   canalId: string,
+  accessToken: string | null,
   value: MetaChangeValue,
 ) {
   // Mapa wa_id -> nome do perfil (vem em value.contacts, paralelo a messages).
@@ -177,11 +189,15 @@ async function processarMensagens(
       if (jaExiste) continue;
     }
 
-    // Conteúdo: hoje tratamos texto; outros tipos viram um marcador legível.
-    const conteudo =
-      msg.type === "text" && msg.text?.body
-        ? msg.text.body
-        : `[${msg.type ?? "mensagem"}]`;
+    // Conteúdo e metadados de mídia (texto inalterado; mídia → download Meta +
+    // upload Storage no passo 2 da feature).
+    const extraido = extrairMidiaWebhook(msg);
+    let tipo: TipoMensagemDb = extraido.tipo;
+    let conteudo: string | null = extraido.conteudo;
+    let mediaUrl: string | null = null;
+    let mediaMime: string | null = null;
+    let mediaNome: string | null = extraido.filename;
+    let mediaTamanho: number | null = null;
 
     // created_at a partir do timestamp do Meta (unix em segundos), se vier.
     const createdAt = msg.timestamp
@@ -207,12 +223,44 @@ async function processarMensagens(
     );
     if (!conversaId) continue;
 
+    if (extraido.ehMidia) {
+      if (accessToken && extraido.mediaId) {
+        const midia = await persistirMidiaRecebida(
+          admin,
+          accessToken,
+          empresaId,
+          conversaId,
+          extraido,
+        );
+        mediaUrl = midia.mediaUrl;
+        mediaMime = midia.mediaMime;
+        mediaNome = midia.mediaNome;
+        mediaTamanho = midia.mediaTamanho;
+        conteudo = midia.conteudo;
+      } else {
+        if (!accessToken) {
+          console.error(
+            `[whatsapp:webhook] mídia sem access_token (empresa=${empresaId})`,
+          );
+        }
+        conteudo =
+          extraido.caption?.trim() ||
+          (extraido.mediaId ? "[mídia não baixada]" : "[mídia sem id]");
+        mediaMime = extraido.mimeType;
+      }
+    }
+
     // Insere a mensagem de ENTRADA.
     const { error: msgError } = await admin.from("mensagens").insert({
       empresa_id: empresaId,
       conversa_id: conversaId,
       direcao: "entrada",
+      tipo,
       conteudo,
+      media_url: mediaUrl,
+      media_mime: mediaMime,
+      media_nome: mediaNome,
+      media_tamanho: mediaTamanho,
       status: "recebida",
       meta_message_id: metaId ?? null,
       created_at: createdAt,
@@ -415,6 +463,32 @@ type MetaChangeValue = {
     timestamp?: string;
     type?: string;
     text?: { body?: string };
+    image?: {
+      id?: string;
+      mime_type?: string;
+      caption?: string;
+    };
+    audio?: {
+      id?: string;
+      mime_type?: string;
+      voice?: boolean;
+    };
+    video?: {
+      id?: string;
+      mime_type?: string;
+      caption?: string;
+    };
+    document?: {
+      id?: string;
+      mime_type?: string;
+      caption?: string;
+      filename?: string;
+    };
+    sticker?: {
+      id?: string;
+      mime_type?: string;
+      animated?: boolean;
+    };
   }[];
   statuses?: { id?: string; status?: string }[];
 };
