@@ -291,6 +291,18 @@ async function processarMensagens(
 }
 
 // Callbacks de STATUS (sent/delivered/read/failed) das mensagens que enviamos.
+//
+// Anti-regressão: um único UPDATE com .in('status', [...]) — só aplica se o
+// status ATUAL estiver na lista de pré-requisitos do novo. Evita race read→write
+// e impede delivered atrasado rebaixar 'lida' → 'entregue'.
+const STATUS_ANTERIORES: Record<string, string[]> = {
+  enviada: ["enviada"],
+  entregue: ["enviada"],
+  lida: ["enviada", "entregue"],
+  // Terminal: só a partir de 'enviada' (não rebaixa lida/entregue para falhou).
+  falhou: ["enviada"],
+};
+
 async function processarStatuses(
   admin: Admin,
   empresaId: string,
@@ -307,12 +319,30 @@ async function processarStatuses(
     const novo = mapa[st.status ?? ""];
     if (!st.id || !novo) continue;
 
-    // Casa pelo meta_message_id (wamid) e escopa pela empresa do canal.
-    await admin
+    const anteriores = STATUS_ANTERIORES[novo];
+    if (!anteriores) continue;
+
+    const { data, error } = await admin
       .from("mensagens")
       .update({ status: novo })
       .eq("meta_message_id", st.id)
-      .eq("empresa_id", empresaId);
+      .eq("empresa_id", empresaId)
+      .in("status", anteriores)
+      .select("id");
+
+    if (error) {
+      console.error(
+        `[whatsapp:webhook] status update falhou (wamid=${st.id}, meta=${st.status}, novo=${novo}, empresa=${empresaId}): ${error.message}`,
+      );
+      continue;
+    }
+
+    const afetadas = data?.length ?? 0;
+    if (afetadas === 0) {
+      console.log(
+        `[whatsapp:webhook] status ignorado (wamid=${st.id}, meta=${st.status}, novo=${novo}, empresa=${empresaId}): 0 linhas — wamid ausente, regressão bloqueada ou já no estado`,
+      );
+    }
   }
 }
 
