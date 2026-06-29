@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
   ACCEPT_MIDIA,
@@ -35,6 +35,10 @@ export type Mensagem = {
   mediaTamanho: number | null;
   status: string | null;
   createdAt: string;
+  /** Key estável p/ React — não muda na reconciliação temp→real. */
+  renderKey?: string;
+  /** Blob local mantido até a mídia persistida (/api/midia) carregar. */
+  previewBlobUrl?: string | null;
 };
 
 type MensagemRowDb = {
@@ -85,6 +89,47 @@ function casarProvisorioComNova(m: Mensagem, nova: Mensagem): boolean {
   return true;
 }
 
+/** Mescla mensagem real com metadados do provisório (key estável + blob). */
+function mesclarProvisorioComReal(
+  provisorio: Mensagem,
+  real: Mensagem,
+): Mensagem {
+  const blob =
+    provisorio.previewBlobUrl ??
+    (provisorio.mediaUrl?.startsWith("blob:")
+      ? provisorio.mediaUrl
+      : null);
+
+  return {
+    ...real,
+    renderKey: provisorio.renderKey ?? provisorio.id,
+    previewBlobUrl: blob,
+  };
+}
+
+/** Reconcilia lista: troca temp pelo real ou mescla blob no real já inserido. */
+function reconciliarListaComReal(
+  prev: Mensagem[],
+  tempId: string,
+  real: Mensagem,
+): Mensagem[] {
+  const provisorio = prev.find((m) => m.id === tempId);
+  if (!provisorio) {
+    if (prev.some((m) => m.id === real.id)) return prev;
+    return [...prev, real];
+  }
+
+  const mesclada = mesclarProvisorioComReal(provisorio, real);
+
+  if (prev.some((m) => m.id === real.id && m.id !== tempId)) {
+    return prev
+      .filter((m) => m.id !== tempId)
+      .map((m) => (m.id === real.id ? mesclarProvisorioComReal(provisorio, m) : m));
+  }
+
+  return prev.map((m) => (m.id === tempId ? mesclada : m));
+}
+
 type ArquivoPendente = {
   file: File;
   previewUrl: string;
@@ -93,7 +138,10 @@ type ArquivoPendente = {
 
 /** Limites visuais compartilhados — imagem/vídeo no balão (entrada e saída). */
 const CLASSE_MIDIA_VISUAL =
-  "block max-h-64 max-w-[min(100%,18rem)] rounded-lg object-contain";
+  "block h-auto max-h-64 w-auto max-w-full rounded-lg object-contain";
+
+const CLASSE_MIDIA_WRAPPER =
+  "inline-block max-w-[min(100%,18rem)] overflow-hidden";
 
 export function ConversasClient({
   conversasIniciais,
@@ -219,7 +267,10 @@ export function ConversasClient({
             );
             if (idxProvisorio !== -1) {
               const copia = [...prev];
-              copia[idxProvisorio] = nova;
+              copia[idxProvisorio] = mesclarProvisorioComReal(
+                copia[idxProvisorio],
+                nova,
+              );
               return copia;
             }
 
@@ -257,6 +308,7 @@ export function ConversasClient({
     const tempId = `temp-${crypto.randomUUID()}`;
     const otimista: Mensagem = {
       id: tempId,
+      renderKey: tempId,
       conversaId,
       direcao: "saida",
       tipo: "texto",
@@ -323,15 +375,7 @@ export function ConversasClient({
       status: mensagem.status ?? null,
       createdAt: mensagem.createdAt,
     };
-    setMensagens((prev) => {
-      // Se o evento Realtime já injetou a versão real desta mensagem (corrida em
-      // que o INSERT chegou antes desta resposta), apenas descarta o provisório.
-      // Caso contrário, troca o temp pelo real. Em ambos os casos não duplica.
-      if (prev.some((m) => m.id === real.id)) {
-        return prev.filter((m) => m.id !== tempId);
-      }
-      return prev.map((m) => (m.id === tempId ? real : m));
-    });
+    setMensagens((prev) => reconciliarListaComReal(prev, tempId, real));
     setConversas((prev) =>
       prev.map((c) =>
         c.id === conversaId
@@ -361,11 +405,13 @@ export function ConversasClient({
 
     const otimista: Mensagem = {
       id: tempId,
+      renderKey: tempId,
       conversaId,
       direcao: "saida",
       tipo,
       conteudo: caption,
-      mediaUrl: previewUrl,
+      mediaUrl: null,
+      previewBlobUrl: previewUrl,
       mediaMime: arquivo.type.split(";")[0].trim().toLowerCase(),
       mediaNome: tipo === "documento" ? arquivo.name || "Documento" : null,
       mediaTamanho: arquivo.size,
@@ -408,7 +454,6 @@ export function ConversasClient({
     }
 
     const { mensagem } = await resposta.json();
-    URL.revokeObjectURL(previewUrl);
 
     const real: Mensagem = {
       id: mensagem.id,
@@ -424,12 +469,7 @@ export function ConversasClient({
       createdAt: mensagem.createdAt,
     };
 
-    setMensagens((prev) => {
-      if (prev.some((m) => m.id === real.id)) {
-        return prev.filter((m) => m.id !== tempId);
-      }
-      return prev.map((m) => (m.id === tempId ? real : m));
-    });
+    setMensagens((prev) => reconciliarListaComReal(prev, tempId, real));
     setConversas((prev) =>
       prev.map((c) =>
         c.id === conversaId
@@ -476,6 +516,14 @@ export function ConversasClient({
   const podeEnviar = arquivoPendente
     ? !enviando
     : !!texto.trim() && !enviando;
+
+  const consumirPreviewBlob = useCallback((renderKey: string) => {
+    setMensagens((prev) =>
+      prev.map((m) =>
+        m.renderKey === renderKey ? { ...m, previewBlobUrl: null } : m,
+      ),
+    );
+  }, []);
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -573,7 +621,12 @@ export function ConversasClient({
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
               <div className="mx-auto flex max-w-2xl flex-col gap-2">
                 {mensagensDaConversa.map((m) => (
-                  <Balao key={m.id} mensagem={m} montado={montado} />
+                  <Balao
+                    key={m.renderKey ?? m.id}
+                    mensagem={m}
+                    montado={montado}
+                    onPreviewBlobConsumido={consumirPreviewBlob}
+                  />
                 ))}
                 <div ref={fimRef} />
               </div>
@@ -652,18 +705,24 @@ export function ConversasClient({
 function Balao({
   mensagem,
   montado,
+  onPreviewBlobConsumido,
 }: {
   mensagem: Mensagem;
   montado: boolean;
+  onPreviewBlobConsumido?: (renderKey: string) => void;
 }) {
   const saida = mensagem.direcao === "saida";
-  const urlMidia = mensagem.mediaUrl
-    ? mensagem.mediaUrl.startsWith("blob:")
-      ? mensagem.mediaUrl
-      : `/api/midia/${mensagem.mediaUrl}`
-    : null;
+  const urlPersistida =
+    mensagem.mediaUrl && !mensagem.mediaUrl.startsWith("blob:")
+      ? `/api/midia/${mensagem.mediaUrl}`
+      : null;
+  const blobUrl =
+    mensagem.previewBlobUrl ??
+    (mensagem.mediaUrl?.startsWith("blob:") ? mensagem.mediaUrl : null);
+  const renderKey = mensagem.renderKey ?? mensagem.id;
 
   if (mensagem.tipo === "sticker") {
+    const urlMidia = urlPersistida ?? blobUrl;
     return (
       <div className={`flex ${saida ? "justify-end" : "justify-start"}`}>
         <div className="max-w-[80%]">
@@ -704,14 +763,14 @@ function Balao({
     mensagem.tipo !== "texto" ? "mt-2" : ""
   }`;
 
-  function ConteudoMidia() {
+  function conteudoMidia() {
     if (mensagem.tipo === "texto") {
       return (
         <p className="whitespace-pre-wrap break-words">{mensagem.conteudo}</p>
       );
     }
 
-    if (!urlMidia) {
+    if (!urlPersistida && !blobUrl) {
       return <PlaceholderMidia caption={mensagem.conteudo} saida={saida} />;
     }
 
@@ -719,12 +778,11 @@ function Balao({
       case "imagem":
         return (
           <>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={urlMidia}
-              alt=""
-              loading="lazy"
-              className={CLASSE_MIDIA_VISUAL}
+            <ImagemMidiaBalao
+              urlPersistida={urlPersistida}
+              blobUrl={blobUrl}
+              renderKey={renderKey}
+              onBlobConsumido={onPreviewBlobConsumido}
             />
             {mensagem.conteudo.trim() && (
               <p className={classesCaption}>{mensagem.conteudo}</p>
@@ -734,10 +792,11 @@ function Balao({
       case "video":
         return (
           <>
-            <video
-              controls
-              src={urlMidia}
-              className={CLASSE_MIDIA_VISUAL}
+            <VideoMidiaBalao
+              urlPersistida={urlPersistida}
+              blobUrl={blobUrl}
+              renderKey={renderKey}
+              onBlobConsumido={onPreviewBlobConsumido}
             />
             {mensagem.conteudo.trim() && (
               <p className={classesCaption}>{mensagem.conteudo}</p>
@@ -746,30 +805,25 @@ function Balao({
         );
       case "audio":
         return (
-          <audio controls src={urlMidia} className="min-w-[200px] w-full" />
+          <AudioMidiaBalao
+            urlPersistida={urlPersistida}
+            blobUrl={blobUrl}
+            renderKey={renderKey}
+            onBlobConsumido={onPreviewBlobConsumido}
+          />
         );
       case "documento":
         return (
           <>
-            <a
-              href={urlMidia}
-              download={mensagem.mediaNome ?? true}
-              className={`flex items-center gap-2 rounded-lg border px-3 py-2 transition ${
-                saida
-                  ? "border-primary-foreground/30 hover:bg-primary-foreground/10"
-                  : "border-border hover:bg-primary-subtle/60"
-              }`}
-            >
-              <span aria-hidden="true">📄</span>
-              <span className="min-w-0 flex-1 truncate">
-                {mensagem.mediaNome ?? "Documento"}
-              </span>
-              {mensagem.mediaTamanho != null && (
-                <span className="shrink-0 text-xs opacity-70">
-                  {formatarTamanho(mensagem.mediaTamanho)}
-                </span>
-              )}
-            </a>
+            <DocumentoMidiaBalao
+              urlPersistida={urlPersistida}
+              blobUrl={blobUrl}
+              nome={mensagem.mediaNome}
+              tamanho={mensagem.mediaTamanho}
+              saida={saida}
+              renderKey={renderKey}
+              onBlobConsumido={onPreviewBlobConsumido}
+            />
             {mensagem.conteudo.trim() && (
               <p className={classesCaption}>{mensagem.conteudo}</p>
             )}
@@ -783,12 +837,236 @@ function Balao({
   return (
     <div className={`flex ${saida ? "justify-end" : "justify-start"}`}>
       <div className={classesBalao}>
-        <ConteudoMidia />
+        {conteudoMidia()}
         <p className={classesHora}>
           {montado ? formatarHora(mensagem.createdAt) : ""}
         </p>
       </div>
     </div>
+  );
+}
+
+/** Pré-carrega URL persistida; mantém blob visível até estar pronta (anti-flicker). */
+function useTransicaoMidia(
+  urlPersistida: string | null,
+  blobUrl: string | null,
+  renderKey: string,
+  tipo: "imagem" | "video" | "audio" | "documento",
+  onBlobConsumido?: (renderKey: string) => void,
+) {
+  const [persistidaPronta, setPersistidaPronta] = useState(
+    () => !urlPersistida || !blobUrl,
+  );
+
+  useEffect(() => {
+    if (!urlPersistida || !blobUrl) {
+      setPersistidaPronta(true);
+      return;
+    }
+
+    setPersistidaPronta(false);
+    let cancelado = false;
+
+    const concluir = () => {
+      if (cancelado) return;
+      setPersistidaPronta(true);
+      URL.revokeObjectURL(blobUrl);
+      onBlobConsumido?.(renderKey);
+    };
+
+    if (tipo === "imagem") {
+      const img = new Image();
+      img.onload = concluir;
+      img.onerror = concluir;
+      img.src = urlPersistida;
+      return () => {
+        cancelado = true;
+        img.onload = null;
+        img.onerror = null;
+      };
+    }
+
+    if (tipo === "video") {
+      const el = document.createElement("video");
+      el.preload = "auto";
+      el.oncanplaythrough = concluir;
+      el.onerror = concluir;
+      el.src = urlPersistida;
+      return () => {
+        cancelado = true;
+        el.oncanplaythrough = null;
+        el.onerror = null;
+        el.removeAttribute("src");
+        el.load();
+      };
+    }
+
+    if (tipo === "audio") {
+      const el = document.createElement("audio");
+      el.preload = "auto";
+      el.oncanplaythrough = concluir;
+      el.onerror = concluir;
+      el.src = urlPersistida;
+      return () => {
+        cancelado = true;
+        el.oncanplaythrough = null;
+        el.onerror = null;
+        el.removeAttribute("src");
+        el.load();
+      };
+    }
+
+    // documento: aquece o fetch antes de trocar o href
+    fetch(urlPersistida, { method: "GET" })
+      .then(concluir)
+      .catch(concluir);
+
+    return () => {
+      cancelado = true;
+    };
+  }, [urlPersistida, blobUrl, renderKey, tipo, onBlobConsumido]);
+
+  const srcVisivel =
+    urlPersistida && persistidaPronta && blobUrl
+      ? urlPersistida
+      : blobUrl ?? urlPersistida;
+
+  return { srcVisivel };
+}
+
+function ImagemMidiaBalao({
+  urlPersistida,
+  blobUrl,
+  renderKey,
+  onBlobConsumido,
+}: {
+  urlPersistida: string | null;
+  blobUrl: string | null;
+  renderKey: string;
+  onBlobConsumido?: (renderKey: string) => void;
+}) {
+  const { srcVisivel } = useTransicaoMidia(
+    urlPersistida,
+    blobUrl,
+    renderKey,
+    "imagem",
+    onBlobConsumido,
+  );
+
+  if (!srcVisivel) return null;
+
+  return (
+    <div className={CLASSE_MIDIA_WRAPPER}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={srcVisivel}
+        alt=""
+        decoding="async"
+        className={CLASSE_MIDIA_VISUAL}
+      />
+    </div>
+  );
+}
+
+function VideoMidiaBalao({
+  urlPersistida,
+  blobUrl,
+  renderKey,
+  onBlobConsumido,
+}: {
+  urlPersistida: string | null;
+  blobUrl: string | null;
+  renderKey: string;
+  onBlobConsumido?: (renderKey: string) => void;
+}) {
+  const { srcVisivel } = useTransicaoMidia(
+    urlPersistida,
+    blobUrl,
+    renderKey,
+    "video",
+    onBlobConsumido,
+  );
+
+  if (!srcVisivel) return null;
+
+  return (
+    <div className={CLASSE_MIDIA_WRAPPER}>
+      <video controls src={srcVisivel} className={CLASSE_MIDIA_VISUAL} />
+    </div>
+  );
+}
+
+function AudioMidiaBalao({
+  urlPersistida,
+  blobUrl,
+  renderKey,
+  onBlobConsumido,
+}: {
+  urlPersistida: string | null;
+  blobUrl: string | null;
+  renderKey: string;
+  onBlobConsumido?: (renderKey: string) => void;
+}) {
+  const { srcVisivel } = useTransicaoMidia(
+    urlPersistida,
+    blobUrl,
+    renderKey,
+    "audio",
+    onBlobConsumido,
+  );
+
+  if (!srcVisivel) return null;
+
+  return (
+    <audio controls src={srcVisivel} className="min-w-[200px] w-full max-w-full" />
+  );
+}
+
+function DocumentoMidiaBalao({
+  urlPersistida,
+  blobUrl,
+  nome,
+  tamanho,
+  saida,
+  renderKey,
+  onBlobConsumido,
+}: {
+  urlPersistida: string | null;
+  blobUrl: string | null;
+  nome: string | null;
+  tamanho: number | null;
+  saida: boolean;
+  renderKey: string;
+  onBlobConsumido?: (renderKey: string) => void;
+}) {
+  const { srcVisivel } = useTransicaoMidia(
+    urlPersistida,
+    blobUrl,
+    renderKey,
+    "documento",
+    onBlobConsumido,
+  );
+
+  if (!srcVisivel) return null;
+
+  return (
+    <a
+      href={srcVisivel}
+      download={nome ?? true}
+      className={`flex max-w-full items-center gap-2 rounded-lg border px-3 py-2 transition ${
+        saida
+          ? "border-primary-foreground/30 hover:bg-primary-foreground/10"
+          : "border-border hover:bg-primary-subtle/60"
+      }`}
+    >
+      <span aria-hidden="true">📄</span>
+      <span className="min-w-0 flex-1 truncate">{nome ?? "Documento"}</span>
+      {tamanho != null && (
+        <span className="shrink-0 text-xs opacity-70">
+          {formatarTamanho(tamanho)}
+        </span>
+      )}
+    </a>
   );
 }
 
