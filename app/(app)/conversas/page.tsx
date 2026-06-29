@@ -45,7 +45,9 @@ export default async function ConversasPage() {
   // suficiente e evita N+1: o cliente agrupa por conversa e exibe na hora.
   const { data: mensagensRaw } = await supabase
     .from("mensagens")
-    .select("id, conversa_id, direcao, conteudo, status, created_at")
+    .select(
+      "id, conversa_id, direcao, tipo, conteudo, media_url, media_mime, media_nome, media_tamanho, status, created_at",
+    )
     .order("created_at", { ascending: true });
 
   const conversas: Conversa[] = (conversasRaw ?? []).map((c) => {
@@ -63,7 +65,12 @@ export default async function ConversasPage() {
     id: m.id as string,
     conversaId: m.conversa_id as string,
     direcao: m.direcao as "entrada" | "saida",
+    tipo: (m.tipo as Mensagem["tipo"]) ?? "texto",
     conteudo: m.conteudo ?? "",
+    mediaUrl: (m.media_url as string | null) ?? null,
+    mediaMime: (m.media_mime as string | null) ?? null,
+    mediaNome: (m.media_nome as string | null) ?? null,
+    mediaTamanho: (m.media_tamanho as number | null) ?? null,
     status: (m.status as string) ?? null,
     createdAt: m.created_at as string,
   }));

@@ -10,14 +10,58 @@ export type Conversa = {
   ultimaMensagemEm: string;
 };
 
+export type TipoMensagem =
+  | "texto"
+  | "imagem"
+  | "audio"
+  | "video"
+  | "documento"
+  | "sticker";
+
 export type Mensagem = {
   id: string;
   conversaId: string;
   direcao: "entrada" | "saida";
+  tipo: TipoMensagem;
   conteudo: string;
+  mediaUrl: string | null;
+  mediaMime: string | null;
+  mediaNome: string | null;
+  mediaTamanho: number | null;
   status: string | null;
   createdAt: string;
 };
+
+type MensagemRowDb = {
+  id: string;
+  conversa_id: string;
+  direcao: "entrada" | "saida";
+  tipo?: string | null;
+  conteudo?: string | null;
+  media_url?: string | null;
+  media_mime?: string | null;
+  media_nome?: string | null;
+  media_tamanho?: number | null;
+  status?: string | null;
+  created_at: string;
+};
+
+/** Mapeia linha do banco/realtime (snake_case) → Mensagem (camelCase). Mesmo shape do SSR. */
+function mapearMensagemRow(row: MensagemRowDb): Mensagem {
+  return {
+    id: row.id,
+    conversaId: row.conversa_id,
+    direcao: row.direcao,
+    tipo: (row.tipo as TipoMensagem) ?? "texto",
+    conteudo: row.conteudo ?? "",
+    mediaUrl: row.media_url ?? null,
+    mediaMime: row.media_mime ?? null,
+    mediaNome: row.media_nome ?? null,
+    mediaTamanho: row.media_tamanho ?? null,
+    status: row.status ?? null,
+    createdAt: row.created_at,
+  };
+}
 
 export function ConversasClient({
   conversasIniciais,
@@ -114,22 +158,7 @@ export function ConversasClient({
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "mensagens" },
         (payload) => {
-          const row = payload.new as {
-            id: string;
-            conversa_id: string;
-            direcao: "entrada" | "saida";
-            conteudo: string | null;
-            status: string | null;
-            created_at: string;
-          };
-          const nova: Mensagem = {
-            id: row.id,
-            conversaId: row.conversa_id,
-            direcao: row.direcao,
-            conteudo: row.conteudo ?? "",
-            status: row.status ?? null,
-            createdAt: row.created_at,
-          };
+          const nova = mapearMensagemRow(payload.new as MensagemRowDb);
 
           setMensagens((prev) => {
             // 1) Já temos a mensagem pelo ID real (a reconciliação do envio
@@ -182,7 +211,12 @@ export function ConversasClient({
       id: tempId,
       conversaId,
       direcao: "saida",
+      tipo: "texto",
       conteudo,
+      mediaUrl: null,
+      mediaMime: null,
+      mediaNome: null,
+      mediaTamanho: null,
       status: "enviada",
       createdAt: agora,
     };
@@ -232,7 +266,12 @@ export function ConversasClient({
       id: mensagem.id,
       conversaId: mensagem.conversaId,
       direcao: mensagem.direcao,
+      tipo: (mensagem.tipo as TipoMensagem) ?? "texto",
       conteudo: mensagem.conteudo ?? "",
+      mediaUrl: mensagem.mediaUrl ?? null,
+      mediaMime: mensagem.mediaMime ?? null,
+      mediaNome: mensagem.mediaNome ?? null,
+      mediaTamanho: mensagem.mediaTamanho ?? null,
       status: mensagem.status ?? null,
       createdAt: mensagem.createdAt,
     };
@@ -300,7 +339,7 @@ export function ConversasClient({
                     </div>
                     <p className="truncate text-sm text-muted">
                       {previa
-                        ? `${previa.direcao === "saida" ? "Você: " : ""}${previa.conteudo}`
+                        ? `${previa.direcao === "saida" ? "Você: " : ""}${textoPrevia(previa)}`
                         : "Sem mensagens"}
                     </p>
                   </div>
@@ -403,26 +442,184 @@ function Balao({
   montado: boolean;
 }) {
   const saida = mensagem.direcao === "saida";
+  const urlMidia = mensagem.mediaUrl
+    ? `/api/midia/${mensagem.mediaUrl}`
+    : null;
+
+  if (mensagem.tipo === "sticker") {
+    return (
+      <div className={`flex ${saida ? "justify-end" : "justify-start"}`}>
+        <div className="max-w-[80%]">
+          {urlMidia ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={urlMidia}
+              alt="Figurinha"
+              loading="lazy"
+              className="h-32 w-32 object-contain"
+            />
+          ) : (
+            <PlaceholderMidia caption={mensagem.conteudo} saida={saida} />
+          )}
+          <p
+            className={`mt-1 text-right text-[10px] ${
+              saida ? "text-muted" : "text-muted"
+            }`}
+          >
+            {montado ? formatarHora(mensagem.createdAt) : ""}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const classesBalao = `max-w-[80%] rounded-2xl px-3 py-2 text-sm shadow-sm ${
+    saida
+      ? "rounded-br-sm bg-primary text-primary-foreground"
+      : "rounded-bl-sm border border-border bg-surface text-foreground"
+  }`;
+
+  const classesHora = `mt-1 text-right text-[10px] ${
+    saida ? "text-primary-foreground/70" : "text-muted"
+  }`;
+
+  const classesCaption = `whitespace-pre-wrap break-words ${
+    mensagem.tipo !== "texto" ? "mt-2" : ""
+  }`;
+
+  function ConteudoMidia() {
+    if (mensagem.tipo === "texto") {
+      return (
+        <p className="whitespace-pre-wrap break-words">{mensagem.conteudo}</p>
+      );
+    }
+
+    if (!urlMidia) {
+      return <PlaceholderMidia caption={mensagem.conteudo} saida={saida} />;
+    }
+
+    switch (mensagem.tipo) {
+      case "imagem":
+        return (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={urlMidia}
+              alt=""
+              loading="lazy"
+              className="max-h-64 max-w-full rounded-lg object-contain"
+            />
+            {mensagem.conteudo.trim() && (
+              <p className={classesCaption}>{mensagem.conteudo}</p>
+            )}
+          </>
+        );
+      case "video":
+        return (
+          <>
+            <video
+              controls
+              src={urlMidia}
+              className="max-h-64 max-w-full rounded-lg"
+            />
+            {mensagem.conteudo.trim() && (
+              <p className={classesCaption}>{mensagem.conteudo}</p>
+            )}
+          </>
+        );
+      case "audio":
+        return (
+          <audio controls src={urlMidia} className="min-w-[200px] w-full" />
+        );
+      case "documento":
+        return (
+          <>
+            <a
+              href={urlMidia}
+              download={mensagem.mediaNome ?? true}
+              className={`flex items-center gap-2 rounded-lg border px-3 py-2 transition ${
+                saida
+                  ? "border-primary-foreground/30 hover:bg-primary-foreground/10"
+                  : "border-border hover:bg-primary-subtle/60"
+              }`}
+            >
+              <span aria-hidden="true">📄</span>
+              <span className="min-w-0 flex-1 truncate">
+                {mensagem.mediaNome ?? "Documento"}
+              </span>
+              {mensagem.mediaTamanho != null && (
+                <span className="shrink-0 text-xs opacity-70">
+                  {formatarTamanho(mensagem.mediaTamanho)}
+                </span>
+              )}
+            </a>
+            {mensagem.conteudo.trim() && (
+              <p className={classesCaption}>{mensagem.conteudo}</p>
+            )}
+          </>
+        );
+      default:
+        return <PlaceholderMidia caption={mensagem.conteudo} saida={saida} />;
+    }
+  }
+
   return (
     <div className={`flex ${saida ? "justify-end" : "justify-start"}`}>
-      <div
-        className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm shadow-sm ${
-          saida
-            ? "rounded-br-sm bg-primary text-primary-foreground"
-            : "rounded-bl-sm border border-border bg-surface text-foreground"
-        }`}
-      >
-        <p className="whitespace-pre-wrap break-words">{mensagem.conteudo}</p>
-        <p
-          className={`mt-1 text-right text-[10px] ${
-            saida ? "text-primary-foreground/70" : "text-muted"
-          }`}
-        >
+      <div className={classesBalao}>
+        <ConteudoMidia />
+        <p className={classesHora}>
           {montado ? formatarHora(mensagem.createdAt) : ""}
         </p>
       </div>
     </div>
   );
+}
+
+function PlaceholderMidia({
+  caption,
+  saida,
+}: {
+  caption: string;
+  saida: boolean;
+}) {
+  return (
+    <>
+      <p
+        className={`text-xs italic ${
+          saida ? "text-primary-foreground/80" : "text-muted"
+        }`}
+      >
+        [mídia indisponível]
+      </p>
+      {caption.trim() && (
+        <p className="mt-1 whitespace-pre-wrap break-words">{caption}</p>
+      )}
+    </>
+  );
+}
+
+function textoPrevia(m: Mensagem): string {
+  if (m.conteudo.trim()) return m.conteudo;
+  switch (m.tipo) {
+    case "imagem":
+      return "📷 Foto";
+    case "audio":
+      return "🎵 Áudio";
+    case "video":
+      return "🎥 Vídeo";
+    case "documento":
+      return "📄 Documento";
+    case "sticker":
+      return "Figurinha";
+    default:
+      return m.conteudo;
+  }
+}
+
+function formatarTamanho(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function Avatar({ nome }: { nome: string | null }) {
