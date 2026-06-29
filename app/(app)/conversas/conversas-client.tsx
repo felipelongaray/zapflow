@@ -141,7 +141,7 @@ const CLASSE_MIDIA_VISUAL =
   "block h-auto max-h-64 w-auto max-w-full rounded-lg object-contain";
 
 const CLASSE_MIDIA_WRAPPER =
-  "inline-block max-w-[min(100%,18rem)] overflow-hidden";
+  "block w-fit max-w-[18rem] shrink-0 overflow-hidden";
 
 export function ConversasClient({
   conversasIniciais,
@@ -749,7 +749,12 @@ function Balao({
     );
   }
 
-  const classesBalao = `max-w-[80%] min-w-0 rounded-2xl px-3 py-2 text-sm shadow-sm ${
+  const ehMidiaVisual =
+    mensagem.tipo === "imagem" || mensagem.tipo === "video";
+
+  const classesBalao = `${
+    ehMidiaVisual ? "w-fit" : "max-w-[80%]"
+  } min-w-0 rounded-2xl px-3 py-2 text-sm shadow-sm ${
     saida
       ? "rounded-br-sm bg-primary text-primary-foreground"
       : "rounded-bl-sm border border-border bg-surface text-foreground"
