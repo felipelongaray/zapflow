@@ -2,6 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import {
+  ACCEPT_MIDIA,
+  validarArquivoMidiaClient,
+} from "@/lib/whatsapp/midia-limites-client";
 
 export type Conversa = {
   id: string;
@@ -63,6 +67,23 @@ function mapearMensagemRow(row: MensagemRowDb): Mensagem {
   };
 }
 
+/** Casa mensagem otimista (temp-*) com INSERT do Realtime/resposta da rota. */
+function casarProvisorioComNova(m: Mensagem, nova: Mensagem): boolean {
+  if (!m.id.startsWith("temp-")) return false;
+  if (m.conversaId !== nova.conversaId) return false;
+  if (m.direcao !== nova.direcao) return false;
+  if (m.tipo !== nova.tipo) return false;
+  if (m.conteudo !== nova.conteudo) return false;
+  if (
+    m.mediaTamanho != null &&
+    nova.mediaTamanho != null &&
+    m.mediaTamanho !== nova.mediaTamanho
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export function ConversasClient({
   conversasIniciais,
   mensagensIniciais,
@@ -88,6 +109,7 @@ export function ConversasClient({
   const [montado, setMontado] = useState(false);
 
   const fimRef = useRef<HTMLDivElement | null>(null);
+  const inputArquivoRef = useRef<HTMLInputElement | null>(null);
 
   // Conversas sempre ordenadas pela mais recente (reflete envios novos).
   const conversasOrdenadas = useMemo(
@@ -169,12 +191,8 @@ export function ConversasClient({
             //    envio reconciliar o provisório. Casa o otimista ainda não
             //    reconciliado (id "temp-", mesma conversa/direção/conteúdo) e o
             //    substitui no lugar — em vez de adicionar uma segunda cópia.
-            const idxProvisorio = prev.findIndex(
-              (m) =>
-                m.id.startsWith("temp-") &&
-                m.conversaId === nova.conversaId &&
-                m.direcao === nova.direcao &&
-                m.conteudo === nova.conteudo,
+            const idxProvisorio = prev.findIndex((m) =>
+              casarProvisorioComNova(m, nova),
             );
             if (idxProvisorio !== -1) {
               const copia = [...prev];
@@ -295,6 +313,113 @@ export function ConversasClient({
     setEnviando(false);
   }
 
+  async function enviarMidia(arquivo: File) {
+    if (!selecionada || enviando) return;
+
+    const validacao = validarArquivoMidiaClient(arquivo);
+    if (!validacao.ok) {
+      setErro(validacao.erro);
+      return;
+    }
+
+    const conversaId = selecionada;
+    const caption = texto.trim() || "";
+    const legenda = caption || null;
+    const agora = new Date().toISOString();
+    const tempId = `temp-${crypto.randomUUID()}`;
+    const blobUrl = URL.createObjectURL(arquivo);
+
+    const otimista: Mensagem = {
+      id: tempId,
+      conversaId,
+      direcao: "saida",
+      tipo: validacao.tipo,
+      conteudo: caption,
+      mediaUrl: blobUrl,
+      mediaMime: arquivo.type.split(";")[0].trim().toLowerCase(),
+      mediaNome:
+        validacao.tipo === "documento" ? arquivo.name || "Documento" : null,
+      mediaTamanho: arquivo.size,
+      status: "enviada",
+      createdAt: agora,
+    };
+
+    setMensagens((prev) => [...prev, otimista]);
+    setConversas((prev) =>
+      prev.map((c) =>
+        c.id === conversaId ? { ...c, ultimaMensagemEm: agora } : c,
+      ),
+    );
+    setTexto("");
+    setErro(null);
+    setEnviando(true);
+
+    const form = new FormData();
+    form.append("arquivo", arquivo);
+    if (legenda) form.append("legenda", legenda);
+
+    let resposta: Response;
+    try {
+      resposta = await fetch(`/api/conversas/${conversaId}/enviar-midia`, {
+        method: "POST",
+        body: form,
+      });
+    } catch {
+      URL.revokeObjectURL(blobUrl);
+      setMensagens((prev) => prev.filter((m) => m.id !== tempId));
+      setErro("Falha de conexão. Tente novamente.");
+      setEnviando(false);
+      return;
+    }
+
+    if (!resposta.ok) {
+      URL.revokeObjectURL(blobUrl);
+      const dados = await resposta.json().catch(() => ({}));
+      setMensagens((prev) => prev.filter((m) => m.id !== tempId));
+      setErro(dados.error ?? "Não foi possível enviar a mídia.");
+      setEnviando(false);
+      return;
+    }
+
+    const { mensagem } = await resposta.json();
+    URL.revokeObjectURL(blobUrl);
+
+    const real: Mensagem = {
+      id: mensagem.id,
+      conversaId: mensagem.conversaId,
+      direcao: mensagem.direcao,
+      tipo: (mensagem.tipo as TipoMensagem) ?? validacao.tipo,
+      conteudo: mensagem.conteudo ?? "",
+      mediaUrl: mensagem.mediaUrl ?? null,
+      mediaMime: mensagem.mediaMime ?? null,
+      mediaNome: mensagem.mediaNome ?? null,
+      mediaTamanho: mensagem.mediaTamanho ?? null,
+      status: mensagem.status ?? null,
+      createdAt: mensagem.createdAt,
+    };
+
+    setMensagens((prev) => {
+      if (prev.some((m) => m.id === real.id)) {
+        return prev.filter((m) => m.id !== tempId);
+      }
+      return prev.map((m) => (m.id === tempId ? real : m));
+    });
+    setConversas((prev) =>
+      prev.map((c) =>
+        c.id === conversaId
+          ? { ...c, ultimaMensagemEm: real.createdAt }
+          : c,
+      ),
+    );
+    setEnviando(false);
+  }
+
+  function aoSelecionarArquivo(e: React.ChangeEvent<HTMLInputElement>) {
+    const arquivo = e.target.files?.[0];
+    e.target.value = "";
+    if (arquivo) void enviarMidia(arquivo);
+  }
+
   return (
     <div className="flex min-h-0 flex-1">
       {/* COLUNA ESQUERDA: lista de conversas. No mobile, some quando há uma
@@ -412,11 +537,30 @@ export function ConversasClient({
               className="flex shrink-0 items-center gap-2 border-t border-border bg-surface px-4 py-3"
             >
               <input
+                ref={inputArquivoRef}
+                type="file"
+                accept={ACCEPT_MIDIA}
+                onChange={aoSelecionarArquivo}
+                className="sr-only"
+                tabIndex={-1}
+                aria-hidden="true"
+              />
+              <button
+                type="button"
+                onClick={() => inputArquivoRef.current?.click()}
+                disabled={enviando}
+                aria-label="Anexar arquivo"
+                className="shrink-0 rounded-full p-2.5 text-muted transition hover:bg-primary-subtle hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <IconeAnexo />
+              </button>
+              <input
                 type="text"
                 value={texto}
                 onChange={(e) => setTexto(e.target.value)}
-                placeholder="Digite uma mensagem"
-                className="min-w-0 flex-1 rounded-full border border-border bg-background px-4 py-2.5 text-foreground outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+                placeholder="Digite uma mensagem ou legenda"
+                disabled={enviando}
+                className="min-w-0 flex-1 rounded-full border border-border bg-background px-4 py-2.5 text-foreground outline-none transition focus:border-primary focus:ring-1 focus:ring-primary disabled:opacity-60"
               />
               <button
                 type="submit"
@@ -443,7 +587,9 @@ function Balao({
 }) {
   const saida = mensagem.direcao === "saida";
   const urlMidia = mensagem.mediaUrl
-    ? `/api/midia/${mensagem.mediaUrl}`
+    ? mensagem.mediaUrl.startsWith("blob:")
+      ? mensagem.mediaUrl
+      : `/api/midia/${mensagem.mediaUrl}`
     : null;
 
   if (mensagem.tipo === "sticker") {
@@ -646,6 +792,24 @@ function formatarHora(iso: string) {
     });
   }
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+}
+
+function IconeAnexo() {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+    </svg>
+  );
 }
 
 function IconeEnviar() {

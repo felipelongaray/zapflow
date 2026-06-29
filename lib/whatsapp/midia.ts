@@ -57,6 +57,212 @@ export function mapearTipoMeta(metaType: string | undefined): TipoMensagemDb {
   return MAPA_TIPO_META[metaType ?? ""] ?? "texto";
 }
 
+export type TipoMidiaEnvio = "imagem" | "audio" | "video" | "documento";
+
+/** Limites conservadores (bytes) alinhados ao Meta Cloud API. */
+export const LIMITES_TAMANHO_MIDIA: Record<TipoMidiaEnvio, number> = {
+  imagem: 5 * 1024 * 1024,
+  video: 16 * 1024 * 1024,
+  audio: 16 * 1024 * 1024,
+  documento: 100 * 1024 * 1024,
+};
+
+const MIMES_IMAGEM = new Set(["image/jpeg", "image/png", "image/webp"]);
+const MIMES_VIDEO = new Set(["video/mp4", "video/3gpp"]);
+const MIMES_AUDIO = new Set([
+  "audio/aac",
+  "audio/mp4",
+  "audio/mpeg",
+  "audio/amr",
+  "audio/ogg",
+]);
+const MIMES_DOCUMENTO = new Set([
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "text/plain",
+]);
+
+function normalizarMime(mime: string): string {
+  return mime.split(";")[0].trim().toLowerCase();
+}
+
+/** Valida MIME e tamanho de arquivo de envio. Usado no servidor (fonte da verdade). */
+export function validarArquivoMidia(
+  mimeType: string,
+  tamanho: number,
+): { ok: true; tipo: TipoMidiaEnvio; mime: string } | { ok: false; erro: string } {
+  const mime = normalizarMime(mimeType);
+
+  let tipo: TipoMidiaEnvio | null = null;
+  if (MIMES_IMAGEM.has(mime)) tipo = "imagem";
+  else if (MIMES_VIDEO.has(mime)) tipo = "video";
+  else if (MIMES_AUDIO.has(mime)) tipo = "audio";
+  else if (MIMES_DOCUMENTO.has(mime)) tipo = "documento";
+
+  if (!tipo) {
+    return {
+      ok: false,
+      erro: "Tipo de arquivo não suportado. Envie imagem, vídeo, áudio ou documento.",
+    };
+  }
+
+  const limite = LIMITES_TAMANHO_MIDIA[tipo];
+  if (tamanho > limite) {
+    const mb = Math.round(limite / (1024 * 1024));
+    return {
+      ok: false,
+      erro: `Arquivo muito grande. O limite para ${tipo} é ${mb} MB.`,
+    };
+  }
+
+  if (tamanho <= 0) {
+    return { ok: false, erro: "Arquivo vazio." };
+  }
+
+  return { ok: true, tipo, mime };
+}
+
+export function tipoMidiaParaMeta(tipo: TipoMidiaEnvio): "image" | "video" | "audio" | "document" {
+  const mapa: Record<TipoMidiaEnvio, "image" | "video" | "audio" | "document"> = {
+    imagem: "image",
+    video: "video",
+    audio: "audio",
+    documento: "document",
+  };
+  return mapa[tipo];
+}
+
+/** Remove arquivo do Storage (best-effort, para rollback em falha no Meta). */
+export async function removerMidiaStorage(
+  admin: SupabaseClient,
+  path: string,
+): Promise<void> {
+  const { error } = await admin.storage.from(BUCKET_MIDIA_MENSAGENS).remove([path]);
+  if (error) {
+    console.error(
+      `[whatsapp:midia] falha ao remover do Storage (path=${path}): ${error.message}`,
+    );
+  }
+}
+
+/** Upload na Media API do Meta → retorna media_id ou null. */
+export async function subirMidiaParaMeta(
+  accessToken: string,
+  phoneNumberId: string,
+  bytes: ArrayBuffer,
+  mimeType: string,
+  filename: string,
+): Promise<string | null> {
+  try {
+    const form = new FormData();
+    form.append(
+      "file",
+      new Blob([bytes], { type: mimeType }),
+      filename,
+    );
+    form.append("type", mimeType);
+    form.append("messaging_product", "whatsapp");
+
+    const resp = await fetch(
+      `https://graph.facebook.com/${GRAPH_VERSION}/${phoneNumberId}/media`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: form,
+      },
+    );
+
+    const json = (await resp.json()) as { id?: string; error?: { message?: string } };
+
+    if (!resp.ok || !json.id) {
+      console.error(
+        `[whatsapp:midia] upload Meta falhou: ${json.error?.message ?? `HTTP ${resp.status}`}`,
+      );
+      return null;
+    }
+
+    return json.id;
+  } catch (e) {
+    console.error(
+      `[whatsapp:midia] erro no upload Meta: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
+    return null;
+  }
+}
+
+type EnvioMidiaMetaParams = {
+  accessToken: string;
+  phoneNumberId: string;
+  destino: string;
+  tipo: TipoMidiaEnvio;
+  mediaId: string;
+  caption: string | null;
+  filename: string | null;
+};
+
+/** Envia mensagem de mídia referenciando media_id do Meta. */
+export async function enviarMensagemMidiaMeta(
+  params: EnvioMidiaMetaParams,
+): Promise<{ ok: true; wamid: string | null } | { ok: false; erro: string }> {
+  const metaTipo = tipoMidiaParaMeta(params.tipo);
+  const bloco: Record<string, unknown> = { id: params.mediaId };
+
+  if (params.caption && params.tipo !== "audio") {
+    bloco.caption = params.caption;
+  }
+  if (params.tipo === "documento" && params.filename) {
+    bloco.filename = params.filename;
+  }
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to: params.destino,
+    type: metaTipo,
+    [metaTipo]: bloco,
+  };
+
+  try {
+    const resp = await fetch(
+      `https://graph.facebook.com/${GRAPH_VERSION}/${params.phoneNumberId}/messages`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+    );
+
+    const json = (await resp.json()) as {
+      messages?: { id?: string }[];
+      error?: { message?: string };
+    };
+
+    if (!resp.ok) {
+      const detalhe = json.error?.message ?? `HTTP ${resp.status}`;
+      console.error(`[whatsapp:midia] envio mensagem Meta falhou: ${detalhe}`);
+      return { ok: false, erro: detalhe };
+    }
+
+    return { ok: true, wamid: json.messages?.[0]?.id ?? null };
+  } catch (e) {
+    console.error(
+      `[whatsapp:midia] erro de rede ao enviar mensagem: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
+    return { ok: false, erro: "Falha de conexão com o WhatsApp." };
+  }
+}
+
 /** Deriva extensão de arquivo a partir do MIME type (fallback: 'bin'). */
 export function extensaoDeMime(mimeType: string | null | undefined): string {
   if (!mimeType) return "bin";
