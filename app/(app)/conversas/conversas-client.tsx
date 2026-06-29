@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
   ACCEPT_MIDIA,
+  type TipoMidiaEnvioClient,
   validarArquivoMidiaClient,
 } from "@/lib/whatsapp/midia-limites-client";
 
@@ -84,6 +85,16 @@ function casarProvisorioComNova(m: Mensagem, nova: Mensagem): boolean {
   return true;
 }
 
+type ArquivoPendente = {
+  file: File;
+  previewUrl: string;
+  tipo: TipoMidiaEnvioClient;
+};
+
+/** Limites visuais compartilhados — imagem/vídeo no balão (entrada e saída). */
+const CLASSE_MIDIA_VISUAL =
+  "block max-h-64 max-w-[min(100%,18rem)] rounded-lg object-contain";
+
 export function ConversasClient({
   conversasIniciais,
   mensagensIniciais,
@@ -97,6 +108,9 @@ export function ConversasClient({
     conversasIniciais[0]?.id ?? null,
   );
   const [texto, setTexto] = useState("");
+  const [arquivoPendente, setArquivoPendente] = useState<ArquivoPendente | null>(
+    null,
+  );
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -162,6 +176,15 @@ export function ConversasClient({
     setMontado(true);
   }, []);
 
+  // Limpa anexo pendente ao trocar de conversa.
+  useEffect(() => {
+    setArquivoPendente((prev) => {
+      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
+    setTexto("");
+  }, [selecionada]);
+
   // Cliente de SESSÃO do browser: anon key + JWT do usuário (cookies). O Realtime
   // roda sob esse JWT, então o RLS de `mensagens` filtra os eventos por
   // empresa_id — o browser só recebe INSERTs do próprio tenant e NUNCA usa
@@ -217,8 +240,15 @@ export function ConversasClient({
 
   async function enviar(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (!selecionada || enviando) return;
+
+    if (arquivoPendente) {
+      await enviarMidia(arquivoPendente);
+      return;
+    }
+
     const conteudo = texto.trim();
-    if (!conteudo || !selecionada || enviando) return;
+    if (!conteudo) return;
 
     const conversaId = selecionada;
     const agora = new Date().toISOString();
@@ -313,32 +343,31 @@ export function ConversasClient({
     setEnviando(false);
   }
 
-  async function enviarMidia(arquivo: File) {
+  async function enviarMidia(pendente: ArquivoPendente) {
     if (!selecionada || enviando) return;
 
-    const validacao = validarArquivoMidiaClient(arquivo);
-    if (!validacao.ok) {
-      setErro(validacao.erro);
-      return;
-    }
-
+    const { file: arquivo, previewUrl, tipo } = pendente;
     const conversaId = selecionada;
-    const caption = texto.trim() || "";
+    const caption =
+      tipo === "audio" ? "" : texto.trim();
     const legenda = caption || null;
     const agora = new Date().toISOString();
     const tempId = `temp-${crypto.randomUUID()}`;
-    const blobUrl = URL.createObjectURL(arquivo);
+
+    setArquivoPendente(null);
+    setTexto("");
+    setErro(null);
+    setEnviando(true);
 
     const otimista: Mensagem = {
       id: tempId,
       conversaId,
       direcao: "saida",
-      tipo: validacao.tipo,
+      tipo,
       conteudo: caption,
-      mediaUrl: blobUrl,
+      mediaUrl: previewUrl,
       mediaMime: arquivo.type.split(";")[0].trim().toLowerCase(),
-      mediaNome:
-        validacao.tipo === "documento" ? arquivo.name || "Documento" : null,
+      mediaNome: tipo === "documento" ? arquivo.name || "Documento" : null,
       mediaTamanho: arquivo.size,
       status: "enviada",
       createdAt: agora,
@@ -350,9 +379,6 @@ export function ConversasClient({
         c.id === conversaId ? { ...c, ultimaMensagemEm: agora } : c,
       ),
     );
-    setTexto("");
-    setErro(null);
-    setEnviando(true);
 
     const form = new FormData();
     form.append("arquivo", arquivo);
@@ -365,7 +391,7 @@ export function ConversasClient({
         body: form,
       });
     } catch {
-      URL.revokeObjectURL(blobUrl);
+      URL.revokeObjectURL(previewUrl);
       setMensagens((prev) => prev.filter((m) => m.id !== tempId));
       setErro("Falha de conexão. Tente novamente.");
       setEnviando(false);
@@ -373,7 +399,7 @@ export function ConversasClient({
     }
 
     if (!resposta.ok) {
-      URL.revokeObjectURL(blobUrl);
+      URL.revokeObjectURL(previewUrl);
       const dados = await resposta.json().catch(() => ({}));
       setMensagens((prev) => prev.filter((m) => m.id !== tempId));
       setErro(dados.error ?? "Não foi possível enviar a mídia.");
@@ -382,13 +408,13 @@ export function ConversasClient({
     }
 
     const { mensagem } = await resposta.json();
-    URL.revokeObjectURL(blobUrl);
+    URL.revokeObjectURL(previewUrl);
 
     const real: Mensagem = {
       id: mensagem.id,
       conversaId: mensagem.conversaId,
       direcao: mensagem.direcao,
-      tipo: (mensagem.tipo as TipoMensagem) ?? validacao.tipo,
+      tipo: (mensagem.tipo as TipoMensagem) ?? tipo,
       conteudo: mensagem.conteudo ?? "",
       mediaUrl: mensagem.mediaUrl ?? null,
       mediaMime: mensagem.mediaMime ?? null,
@@ -414,11 +440,42 @@ export function ConversasClient({
     setEnviando(false);
   }
 
+  function cancelarAnexo() {
+    if (arquivoPendente?.previewUrl) {
+      URL.revokeObjectURL(arquivoPendente.previewUrl);
+    }
+    setArquivoPendente(null);
+    setTexto("");
+    setErro(null);
+  }
+
   function aoSelecionarArquivo(e: React.ChangeEvent<HTMLInputElement>) {
     const arquivo = e.target.files?.[0];
     e.target.value = "";
-    if (arquivo) void enviarMidia(arquivo);
+    if (!arquivo) return;
+
+    const validacao = validarArquivoMidiaClient(arquivo);
+    if (!validacao.ok) {
+      setErro(validacao.erro);
+      return;
+    }
+
+    setErro(null);
+    setArquivoPendente((prev) => {
+      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+      return {
+        file: arquivo,
+        previewUrl: URL.createObjectURL(arquivo),
+        tipo: validacao.tipo,
+      };
+    });
   }
+
+  const legendaDesabilitada =
+    arquivoPendente?.tipo === "audio";
+  const podeEnviar = arquivoPendente
+    ? !enviando
+    : !!texto.trim() && !enviando;
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -532,45 +589,59 @@ export function ConversasClient({
             )}
 
             {/* Campo de resposta */}
-            <form
-              onSubmit={enviar}
-              className="flex shrink-0 items-center gap-2 border-t border-border bg-surface px-4 py-3"
-            >
-              <input
-                ref={inputArquivoRef}
-                type="file"
-                accept={ACCEPT_MIDIA}
-                onChange={aoSelecionarArquivo}
-                className="sr-only"
-                tabIndex={-1}
-                aria-hidden="true"
-              />
-              <button
-                type="button"
-                onClick={() => inputArquivoRef.current?.click()}
-                disabled={enviando}
-                aria-label="Anexar arquivo"
-                className="shrink-0 rounded-full p-2.5 text-muted transition hover:bg-primary-subtle hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            <div className="shrink-0 border-t border-border bg-surface">
+              {arquivoPendente && (
+                <PreviewAnexo
+                  pendente={arquivoPendente}
+                  onCancelar={cancelarAnexo}
+                />
+              )}
+              <form
+                onSubmit={enviar}
+                className="flex items-center gap-2 px-4 py-3"
               >
-                <IconeAnexo />
-              </button>
-              <input
-                type="text"
-                value={texto}
-                onChange={(e) => setTexto(e.target.value)}
-                placeholder="Digite uma mensagem ou legenda"
-                disabled={enviando}
-                className="min-w-0 flex-1 rounded-full border border-border bg-background px-4 py-2.5 text-foreground outline-none transition focus:border-primary focus:ring-1 focus:ring-primary disabled:opacity-60"
-              />
-              <button
-                type="submit"
-                disabled={!texto.trim() || enviando}
-                aria-label="Enviar"
-                className="shrink-0 rounded-full bg-primary p-2.5 text-primary-foreground transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <IconeEnviar />
-              </button>
-            </form>
+                <input
+                  ref={inputArquivoRef}
+                  type="file"
+                  accept={ACCEPT_MIDIA}
+                  onChange={aoSelecionarArquivo}
+                  className="sr-only"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                />
+                <button
+                  type="button"
+                  onClick={() => inputArquivoRef.current?.click()}
+                  disabled={enviando}
+                  aria-label="Anexar arquivo"
+                  className="shrink-0 rounded-full p-2.5 text-muted transition hover:bg-primary-subtle hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <IconeAnexo />
+                </button>
+                <input
+                  type="text"
+                  value={texto}
+                  onChange={(e) => setTexto(e.target.value)}
+                  placeholder={
+                    arquivoPendente
+                      ? legendaDesabilitada
+                        ? "Áudio pronto para enviar"
+                        : "Adicione uma legenda..."
+                      : "Digite uma mensagem"
+                  }
+                  disabled={enviando || legendaDesabilitada}
+                  className="min-w-0 flex-1 rounded-full border border-border bg-background px-4 py-2.5 text-foreground outline-none transition focus:border-primary focus:ring-1 focus:ring-primary disabled:opacity-60"
+                />
+                <button
+                  type="submit"
+                  disabled={!podeEnviar}
+                  aria-label="Enviar"
+                  className="shrink-0 rounded-full bg-primary p-2.5 text-primary-foreground transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <IconeEnviar />
+                </button>
+              </form>
+            </div>
           </>
         )}
       </section>
@@ -619,7 +690,7 @@ function Balao({
     );
   }
 
-  const classesBalao = `max-w-[80%] rounded-2xl px-3 py-2 text-sm shadow-sm ${
+  const classesBalao = `max-w-[80%] min-w-0 rounded-2xl px-3 py-2 text-sm shadow-sm ${
     saida
       ? "rounded-br-sm bg-primary text-primary-foreground"
       : "rounded-bl-sm border border-border bg-surface text-foreground"
@@ -653,7 +724,7 @@ function Balao({
               src={urlMidia}
               alt=""
               loading="lazy"
-              className="max-h-64 max-w-full rounded-lg object-contain"
+              className={CLASSE_MIDIA_VISUAL}
             />
             {mensagem.conteudo.trim() && (
               <p className={classesCaption}>{mensagem.conteudo}</p>
@@ -666,7 +737,7 @@ function Balao({
             <video
               controls
               src={urlMidia}
-              className="max-h-64 max-w-full rounded-lg"
+              className={CLASSE_MIDIA_VISUAL}
             />
             {mensagem.conteudo.trim() && (
               <p className={classesCaption}>{mensagem.conteudo}</p>
@@ -716,6 +787,54 @@ function Balao({
         <p className={classesHora}>
           {montado ? formatarHora(mensagem.createdAt) : ""}
         </p>
+      </div>
+    </div>
+  );
+}
+
+function PreviewAnexo({
+  pendente,
+  onCancelar,
+}: {
+  pendente: ArquivoPendente;
+  onCancelar: () => void;
+}) {
+  const { previewUrl, tipo, file } = pendente;
+
+  return (
+    <div className="flex items-start gap-3 border-b border-border px-4 py-3">
+      <div className="relative shrink-0">
+        {tipo === "imagem" ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={previewUrl}
+            alt=""
+            className="size-16 rounded-lg object-cover"
+          />
+        ) : (
+          <div className="flex size-16 items-center justify-center rounded-lg bg-primary-subtle text-2xl">
+            {tipo === "video" && "🎥"}
+            {tipo === "audio" && "🎵"}
+            {tipo === "documento" && "📄"}
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={onCancelar}
+          aria-label="Remover anexo"
+          className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full bg-foreground text-xs text-background shadow"
+        >
+          ×
+        </button>
+      </div>
+      <div className="min-w-0 flex-1 pt-1">
+        {tipo !== "imagem" && (
+          <p className="truncate text-sm font-medium">{file.name}</p>
+        )}
+        {tipo === "imagem" && (
+          <p className="truncate text-sm text-muted">{file.name}</p>
+        )}
+        <p className="text-xs text-muted">{formatarTamanho(file.size)}</p>
       </div>
     </div>
   );
