@@ -143,7 +143,7 @@ const CLASSE_MIDIA_VISUAL =
 const CLASSE_MIDIA_WRAPPER =
   "block w-fit max-w-[18rem] shrink-0 overflow-hidden";
 
-const MIME_GRAVACAO_OGG_OPUS = "audio/ogg;codecs=opus";
+const MIME_GRAVACAO = "audio/mp4";
 
 export function ConversasClient({
   conversasIniciais,
@@ -233,7 +233,7 @@ export function ConversasClient({
     setMontado(true);
     setSuporteGravacao(
       typeof MediaRecorder !== "undefined" &&
-        MediaRecorder.isTypeSupported(MIME_GRAVACAO_OGG_OPUS),
+        MediaRecorder.isTypeSupported(MIME_GRAVACAO),
     );
   }, []);
 
@@ -573,7 +573,7 @@ export function ConversasClient({
       descartarGravacaoRef.current = false;
 
       const recorder = new MediaRecorder(stream, {
-        mimeType: MIME_GRAVACAO_OGG_OPUS,
+        mimeType: MIME_GRAVACAO,
       });
       mediaRecorderRef.current = recorder;
 
@@ -593,7 +593,7 @@ export function ConversasClient({
           return;
         }
 
-        const blob = new Blob(chunksGravacaoRef.current, { type: "audio/ogg" });
+        const blob = new Blob(chunksGravacaoRef.current, { type: "audio/mp4" });
         chunksGravacaoRef.current = [];
 
         if (blob.size === 0) {
@@ -601,8 +601,8 @@ export function ConversasClient({
           return;
         }
 
-        const file = new File([blob], `audio-${Date.now()}.ogg`, {
-          type: "audio/ogg",
+        const file = new File([blob], `audio-${Date.now()}.m4a`, {
+          type: "audio/mp4",
         });
         const previewUrl = URL.createObjectURL(blob);
 

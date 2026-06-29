@@ -217,9 +217,6 @@ export async function enviarMensagemMidiaMeta(
   if (params.caption && params.tipo !== "audio") {
     bloco.caption = params.caption;
   }
-  if (params.tipo === "audio") {
-    bloco.voice = true;
-  }
   if (params.tipo === "documento" && params.filename) {
     bloco.filename = params.filename;
   }
