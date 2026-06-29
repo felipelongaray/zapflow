@@ -143,6 +143,8 @@ const CLASSE_MIDIA_VISUAL =
 const CLASSE_MIDIA_WRAPPER =
   "block w-fit max-w-[18rem] shrink-0 overflow-hidden";
 
+const MIME_GRAVACAO_OGG_OPUS = "audio/ogg;codecs=opus";
+
 export function ConversasClient({
   conversasIniciais,
   mensagensIniciais,
@@ -161,6 +163,9 @@ export function ConversasClient({
   );
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  const [gravando, setGravando] = useState(false);
+  const [segundosGravacao, setSegundosGravacao] = useState(0);
+  const [suporteGravacao, setSuporteGravacao] = useState(false);
 
   // HIDRATAÇÃO: os horários são formatados com locale/timezone (toLocale*), que
   // diferem entre o SERVIDOR (UTC na Vercel) e o BROWSER (TZ local, ex.: BRT).
@@ -172,6 +177,10 @@ export function ConversasClient({
 
   const fimRef = useRef<HTMLDivElement | null>(null);
   const inputArquivoRef = useRef<HTMLInputElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const streamMicRef = useRef<MediaStream | null>(null);
+  const chunksGravacaoRef = useRef<Blob[]>([]);
+  const descartarGravacaoRef = useRef(false);
 
   // Conversas sempre ordenadas pela mais recente (reflete envios novos).
   const conversasOrdenadas = useMemo(
@@ -222,15 +231,55 @@ export function ConversasClient({
   // Marca que já montou no cliente — habilita a formatação de hora (ver acima).
   useEffect(() => {
     setMontado(true);
+    setSuporteGravacao(
+      typeof MediaRecorder !== "undefined" &&
+        MediaRecorder.isTypeSupported(MIME_GRAVACAO_OGG_OPUS),
+    );
   }, []);
 
-  // Limpa anexo pendente ao trocar de conversa.
+  function pararStreamMic() {
+    streamMicRef.current?.getTracks().forEach((track) => track.stop());
+    streamMicRef.current = null;
+  }
+
+  function encerrarGravacaoAtiva(descartar = true) {
+    descartarGravacaoRef.current = descartar;
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop();
+    } else {
+      pararStreamMic();
+      chunksGravacaoRef.current = [];
+      setGravando(false);
+      setSegundosGravacao(0);
+    }
+    mediaRecorderRef.current = null;
+  }
+
   useEffect(() => {
+    if (!gravando) return;
+    const id = window.setInterval(() => {
+      setSegundosGravacao((s) => s + 1);
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [gravando]);
+
+  useEffect(() => {
+    return () => {
+      encerrarGravacaoAtiva(true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cleanup só no unmount
+  }, []);
+
+  // Limpa anexo pendente e gravação ao trocar de conversa.
+  useEffect(() => {
+    encerrarGravacaoAtiva(true);
     setArquivoPendente((prev) => {
       if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
       return null;
     });
     setTexto("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- só ao trocar conversa
   }, [selecionada]);
 
   // Cliente de SESSÃO do browser: anon key + JWT do usuário (cookies). O Realtime
@@ -510,6 +559,91 @@ export function ConversasClient({
     setErro(null);
   }
 
+  async function iniciarGravacao() {
+    if (!selecionada || enviando || gravando || arquivoPendente) return;
+    if (!suporteGravacao) {
+      setErro("Gravação de voz não suportada neste navegador.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamMicRef.current = stream;
+      chunksGravacaoRef.current = [];
+      descartarGravacaoRef.current = false;
+
+      const recorder = new MediaRecorder(stream, {
+        mimeType: MIME_GRAVACAO_OGG_OPUS,
+      });
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunksGravacaoRef.current.push(event.data);
+      };
+
+      recorder.onstop = () => {
+        pararStreamMic();
+        mediaRecorderRef.current = null;
+        setGravando(false);
+        setSegundosGravacao(0);
+
+        if (descartarGravacaoRef.current) {
+          descartarGravacaoRef.current = false;
+          chunksGravacaoRef.current = [];
+          return;
+        }
+
+        const blob = new Blob(chunksGravacaoRef.current, { type: "audio/ogg" });
+        chunksGravacaoRef.current = [];
+
+        if (blob.size === 0) {
+          setErro("Gravação vazia. Tente novamente.");
+          return;
+        }
+
+        const file = new File([blob], `audio-${Date.now()}.ogg`, {
+          type: "audio/ogg",
+        });
+        const previewUrl = URL.createObjectURL(blob);
+
+        setArquivoPendente((prev) => {
+          if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+          return { file, previewUrl, tipo: "audio" };
+        });
+        setErro(null);
+      };
+
+      recorder.onerror = () => {
+        encerrarGravacaoAtiva(true);
+        setErro("Falha na gravação. Tente novamente.");
+      };
+
+      recorder.start();
+      setGravando(true);
+      setSegundosGravacao(0);
+      setErro(null);
+    } catch {
+      pararStreamMic();
+      setErro("Permissão do microfone negada ou indisponível.");
+    }
+  }
+
+  function pararGravacao() {
+    if (
+      !mediaRecorderRef.current ||
+      mediaRecorderRef.current.state !== "recording"
+    ) {
+      return;
+    }
+    descartarGravacaoRef.current = false;
+    mediaRecorderRef.current.stop();
+  }
+
+  function cancelarGravacao() {
+    if (!gravando) return;
+    encerrarGravacaoAtiva(true);
+  }
+
   function aoSelecionarArquivo(e: React.ChangeEvent<HTMLInputElement>) {
     const arquivo = e.target.files?.[0];
     e.target.value = "";
@@ -534,9 +668,11 @@ export function ConversasClient({
 
   const legendaDesabilitada =
     arquivoPendente?.tipo === "audio";
-  const podeEnviar = arquivoPendente
-    ? !enviando
-    : !!texto.trim() && !enviando;
+  const podeEnviar = gravando
+    ? false
+    : arquivoPendente
+      ? !enviando
+      : !!texto.trim() && !enviando;
 
   const consumirPreviewBlob = useCallback((renderKey: string) => {
     setMensagens((prev) =>
@@ -664,6 +800,27 @@ export function ConversasClient({
 
             {/* Campo de resposta */}
             <div className="shrink-0 border-t border-border bg-surface">
+              {gravando && (
+                <div className="flex items-center gap-3 border-b border-border px-4 py-2 text-sm">
+                  <span
+                    className="size-2 shrink-0 animate-pulse rounded-full bg-danger"
+                    aria-hidden="true"
+                  />
+                  <span className="tabular-nums font-medium text-danger">
+                    {formatarTempoGravacao(segundosGravacao)}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-muted">
+                    Gravando...
+                  </span>
+                  <button
+                    type="button"
+                    onClick={cancelarGravacao}
+                    className="shrink-0 text-xs text-muted transition hover:text-foreground"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              )}
               {arquivoPendente && (
                 <PreviewAnexo
                   pendente={arquivoPendente}
@@ -686,11 +843,32 @@ export function ConversasClient({
                 <button
                   type="button"
                   onClick={() => inputArquivoRef.current?.click()}
-                  disabled={enviando}
+                  disabled={enviando || gravando}
                   aria-label="Anexar arquivo"
                   className="shrink-0 rounded-full p-2.5 text-muted transition hover:bg-primary-subtle hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <IconeAnexo />
+                </button>
+                <button
+                  type="button"
+                  onClick={gravando ? pararGravacao : iniciarGravacao}
+                  disabled={
+                    enviando ||
+                    (!gravando && (!suporteGravacao || !!arquivoPendente))
+                  }
+                  title={
+                    !suporteGravacao && !gravando
+                      ? "Gravação não suportada neste navegador"
+                      : undefined
+                  }
+                  aria-label={gravando ? "Parar gravação" : "Gravar áudio"}
+                  className={`shrink-0 rounded-full p-2.5 transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                    gravando
+                      ? "bg-danger-subtle text-danger hover:bg-danger/20"
+                      : "text-muted hover:bg-primary-subtle hover:text-foreground"
+                  }`}
+                >
+                  {gravando ? <IconeParar /> : <IconeMicrofone />}
                 </button>
                 <input
                   type="text"
@@ -703,7 +881,7 @@ export function ConversasClient({
                         : "Adicione uma legenda..."
                       : "Digite uma mensagem"
                   }
-                  disabled={enviando || legendaDesabilitada}
+                  disabled={enviando || legendaDesabilitada || gravando}
                   className="min-w-0 flex-1 rounded-full border border-border bg-background px-4 py-2.5 text-foreground outline-none transition focus:border-primary focus:ring-1 focus:ring-primary disabled:opacity-60"
                 />
                 <button
@@ -1195,6 +1373,13 @@ function PreviewAnexo({
         {tipo === "imagem" && (
           <p className="truncate text-sm text-muted">{file.name}</p>
         )}
+        {tipo === "audio" && (
+          <audio
+            controls
+            src={previewUrl}
+            className="mt-2 h-8 w-full max-w-xs"
+          />
+        )}
         <p className="text-xs text-muted">{formatarTamanho(file.size)}</p>
       </div>
     </div>
@@ -1248,6 +1433,12 @@ function formatarTamanho(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatarTempoGravacao(segundos: number): string {
+  const m = Math.floor(segundos / 60);
+  const s = segundos % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 function Avatar({ nome }: { nome: string | null }) {
   const inicial = (nome ?? "?").trim().charAt(0).toUpperCase() || "?";
   return (
@@ -1272,6 +1463,40 @@ function formatarHora(iso: string) {
     });
   }
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+}
+
+function IconeMicrofone() {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <line x1="12" x2="12" y1="19" y2="22" />
+    </svg>
+  );
+}
+
+function IconeParar() {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <rect x="6" y="6" width="12" height="12" rx="1" />
+    </svg>
+  );
 }
 
 function IconeAnexo() {
