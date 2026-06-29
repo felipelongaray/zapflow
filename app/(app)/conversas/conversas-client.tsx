@@ -240,13 +240,12 @@ export function ConversasClient({
   // referência estável entre renders.
   const [supabase] = useState(() => createClient());
 
-  // REALTIME: ouve INSERTs em public.mensagens (já incluída na publication
-  // supabase_realtime + replica identity full pela migration 015, feita fora deste
-  // fluxo) e injeta a mensagem nova no estado, sem reload. Cobre tanto as
-  // RECEBIDAS via webhook quanto as ENVIADAS (que também voltam pelo INSERT).
+  // REALTIME: INSERTs e UPDATEs em public.mensagens (publication 015 + replica
+  // identity full). INSERT: nova mensagem / reconciliação otimista. UPDATE: status
+  // entregue/lida ao vivo (webhook processarStatuses).
   useEffect(() => {
     const channel = supabase
-      .channel("mensagens-inserts")
+      .channel("mensagens-realtime")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "mensagens" },
@@ -277,6 +276,28 @@ export function ConversasClient({
             // 3) Mensagem genuinamente nova (recebida via webhook, ou enviada de
             //    outra aba/sessão): adiciona.
             return [...prev, nova];
+          });
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "mensagens" },
+        (payload) => {
+          const atualizada = mapearMensagemRow(payload.new as MensagemRowDb);
+
+          setMensagens((prev) => {
+            const idx = prev.findIndex((m) => m.id === atualizada.id);
+            if (idx === -1) return prev;
+
+            const anterior = prev[idx];
+            const copia = [...prev];
+            // Merge: campos do banco + metadados só do client (key estável, blob).
+            copia[idx] = {
+              ...atualizada,
+              renderKey: anterior.renderKey,
+              previewBlobUrl: anterior.previewBlobUrl,
+            };
+            return copia;
           });
         },
       )
@@ -737,13 +758,13 @@ function Balao({
           ) : (
             <PlaceholderMidia caption={mensagem.conteudo} saida={saida} />
           )}
-          <p
-            className={`mt-1 text-right text-[10px] ${
+          <RodapeBalao
+            mensagem={mensagem}
+            montado={montado}
+            classesHora={`mt-1 text-right text-[10px] ${
               saida ? "text-muted" : "text-muted"
             }`}
-          >
-            {montado ? formatarHora(mensagem.createdAt) : ""}
-          </p>
+          />
         </div>
       </div>
     );
@@ -843,12 +864,69 @@ function Balao({
     <div className={`flex ${saida ? "justify-end" : "justify-start"}`}>
       <div className={classesBalao}>
         {conteudoMidia()}
-        <p className={classesHora}>
-          {montado ? formatarHora(mensagem.createdAt) : ""}
-        </p>
+        <RodapeBalao
+          mensagem={mensagem}
+          montado={montado}
+          classesHora={classesHora}
+        />
       </div>
     </div>
   );
+}
+
+/** Horário + indicador de status (só mensagens de saída). */
+function RodapeBalao({
+  mensagem,
+  montado,
+  classesHora,
+}: {
+  mensagem: Mensagem;
+  montado: boolean;
+  classesHora: string;
+}) {
+  const saida = mensagem.direcao === "saida";
+
+  return (
+    <p className={`${classesHora} flex items-center justify-end gap-1`}>
+      {montado ? (
+        <>
+          <span>{formatarHora(mensagem.createdAt)}</span>
+          {saida && <IndicadorStatus status={mensagem.status} />}
+        </>
+      ) : null}
+    </p>
+  );
+}
+
+function IndicadorStatus({ status }: { status: string | null }) {
+  switch (status) {
+    case "enviada":
+      return (
+        <span className="opacity-70" aria-label="Enviada">
+          ✓
+        </span>
+      );
+    case "entregue":
+      return (
+        <span className="opacity-70" aria-label="Entregue">
+          ✓✓
+        </span>
+      );
+    case "lida":
+      return (
+        <span className="text-sky-200" aria-label="Lida">
+          ✓✓
+        </span>
+      );
+    case "falhou":
+      return (
+        <span className="text-red-300" aria-label="Falhou">
+          ⚠
+        </span>
+      );
+    default:
+      return null;
+  }
 }
 
 /** Pré-carrega URL persistida; mantém blob visível até estar pronta (anti-flicker). */
